@@ -1,8 +1,6 @@
-name: demo
-
 services:
   tele:
-    image: mlan/asterisk
+    image: mlan/asterisk:xtra
     network_mode: bridge                    # Only here to help testing
     cap_add:
       - sys_ptrace                          # Only here to help testing
@@ -21,9 +19,39 @@ services:
       - PULSE_COOKIE=/run/pulse/cookie      # Use host audio
       - WEBSMSD_PORT=${WEBSMSD_PORT-80}     # WEBSMSD internal port
     volumes:
-      - tele-conf:/srv                      # Persistent storage
+      #- ./srv:/srv                      # Persistent storage
       - ./pulse:/run/pulse:rshared          # Use host audio
       - /etc/localtime:/etc/localtime:ro    # Use host timezone
-
-volumes:
-  tele-conf:                                # Persistent storage
+      - ./CAcert.cer:/tmp/CAcert.cer
+      - ./fixssl:/usr/bin/fixssl
+      - ./app/:/app/
+      - ./sound:/var/lib/asterisk/sounds/custom
+      - ./config:/srv/etc/asterisk
+#      - ./extensions.conf:/srv/etc/asterisk/extensions.conf
+#      - ./extensions_custom.conf:/srv/etc/asterisk/extensions_custom.conf
+#      - ./pjsip.conf:/srv/etc/asterisk/pjsip.conf
+      - ./app:/var/lib/asterisk/agi-bin
+        # networks:
+        # - asterisk-net
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ./data:/root/.ollama
+      - ./CAcert.cer:/tmp/CAcert.cer
+      - ./install:/usr/bin/install
+      - ./app:/app
+    networks:
+      frontend:
+        ipv4_address: ${IP_FRONT}
+    ports:
+      - 11434:11434
+networks:
+  frontend:
+    name: ${NETWORK}
+    external: true
+  backend:
+    internal: true
+    #  asterisk-net:
+    #driver: bridge   
+    #volumes:
+    #  tele-conf:                                # Persistent storage

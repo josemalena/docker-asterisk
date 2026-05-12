@@ -1,0 +1,10 @@
+#!/bin/bash
+##Update CA cert, walkaround for UTMs using local CA
+if [ -f /tmp/CAcert.cer ]; then
+    openssl x509 -inform DER -in "/tmp/CAcert.cer" -out /tmp/CAcert.crt
+    chmod 644 /tmp/CAcert.crt
+    cat /tmp/CAcert.crt >> /etc/ssl/certs/ca-certificates.crt
+    openssl x509 -inform DER -in "/tmp/CAcert.cer" -out /usr/local/share/ca-certificates/CAcert.crt
+    chmod 644 /usr/local/share/ca-certificates/CAcert.crt
+    update-ca-certificates
+fi

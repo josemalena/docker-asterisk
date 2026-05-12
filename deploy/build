@@ -1,0 +1,7 @@
+cd ragsterisk
+docker rmi ragsterisk:20 
+docker build --no-cache -t ragsterisk:20 .
+cd ..
+cd rag
+docker rmi ragapi:1.0
+docker build --no-cache -t ragapi:1.0 .

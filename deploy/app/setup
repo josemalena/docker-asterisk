@@ -1,0 +1,19 @@
+#apk --no-cache --update add python3 py3-pip ffmpeg git
+mkdir -p /var/lib/asterisk/agi-bin
+cd /var/lib/asterisk/agi-bin
+python3 -m venv /app
+source ./bin/activate 
+#pip3 install torch torchvision torchaudio numpy tqdm --index-url https://download.pytorch.org/whl/cpu
+pip3 install -r requirements.txt
+#pip3 install --no-deps git+https://github.com/openai/whisper.git
+./test.py
+deactivate
+
+
+
+docker run -it --name rag-test \
+  -v $PWD/app:/var/lib/asterisk/agi-bin/app2 \
+  -v $PWD/sound:/var/lib/asterisk/sounds/custom \
+  -p 5060:5060/udp -p 10000-20000:10000-20000/udp \
+  -p 5038:5038 -p 8088:8088 \
+  ragsterisk:20

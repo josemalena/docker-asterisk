@@ -1,0 +1,14 @@
+#!/bin/bash
+##Update CA cert, walkaround for UTMs using local CA
+if [ -f /tmp/CAcert.cer ]; then
+    openssl x509 -inform DER -in "/tmp/CAcert.cer" -out /usr/local/share/ca-certificates/CAcert.crt
+    chmod 644 /usr/local/share/ca-certificates/CAcert.crt
+    cat /usr/local/share/ca-certificates/CAcert.crt >> /etc/ssl/certs/ca-certificates.crt
+    update-ca-certificates
+fi
+##
+apt-get update -y
+apt install python3 python3-pip -y
+pip3 install -U oracledb langchain-ollama
+export LD_LIBRARY_PATH=/app/instantclient_19_26:$LD_LIBRARY_PATH
+ollama pull deepseek-r1:1.5b

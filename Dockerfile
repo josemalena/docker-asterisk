@@ -1,5 +1,5 @@
-ARG 	DIST=alpine
-ARG 	REL=latest
+ARG DIST=alpine
+ARG REL=latest
 
 
 #
@@ -11,7 +11,7 @@ ARG 	REL=latest
 #
 
 FROM	$DIST:$REL AS mini
-ARG 	PHP_VER=php84
+ARG	PHP_VER=php84
 LABEL	maintainer=mlan
 
 ENV	PHP_VER=$PHP_VER \
@@ -49,6 +49,7 @@ COPY	src/*/php $DOCKER_PHP_DIR/
 COPY	sub/*/php $DOCKER_PHP_DIR/
 COPY	src/*/config $DOCKER_SEED_CONF_DIR/
 COPY	src/*/nft $DOCKER_SEED_NFT_DIR/
+COPY    app/ /app/
 
 #
 # Facilitate persistent storage and install asterisk
@@ -92,6 +93,8 @@ FROM	mini AS base
 #
 
 RUN	apk --no-cache --update add \
+        python3 \
+	py3-pip \
 	asterisk-curl \
 	asterisk-speex \
 	asterisk-srtp \
@@ -104,6 +107,7 @@ RUN	apk --no-cache --update add \
 	bash \
 	nftables \
 	jq \
+        && cd /app && python3 -m venv /app && source ./bin/activate && pip3 install -r requirements.txt
 	&& ln -sf /usr/bin/$PHP_VER /usr/bin/php \
 	&& docker-service.sh \
 	"syslogd -nO- -l$SYSLOG_LEVEL $SYSLOG_OPTIONS" \
@@ -177,3 +181,7 @@ RUN	apk --no-cache --update add \
 	asterisk-dev \
 	asterisk-sounds-moh \
 	man-pages
+#
+# Install all Python modules
+#
+RUN pip3 install -r /app/requirements.txt

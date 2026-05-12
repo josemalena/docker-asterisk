@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asistente Real[IA] - Cooperativa Vega Real</title>
+  <meta property="og:locale" content="es_ES" />
+    <meta property="og:site_name" content="Vega Real" />
+    <meta property="og:title" content="Asistente Real[IA] - Cooperativa Vega Real" />
+    <meta property="og:description" content="¡En Vega Real, estamos en Feria! 🎉 Nuestra XXV Expo Feria Madre Feliz es modalidad presencial en Casa Club Vega Real. ¡25 años haciendo felices a mamá y nuestra gente! 🎉🎉🎉">
+    <meta property="og:image" content="loferia.jpg">
+    <meta property="og:image:type" content="image/jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Asistente Real[IA] - Cooperativa Vega Real">
+    <meta property="og:url" content="https://realia.cvr.com.do/">
+    <meta property="og:type" content="event">
+    <meta property="event:start_time" content="2025-05-01T09:00:00-04:00">
+    <meta property="event:end_time" content="2025-05-31T13:00:00-04:00">
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:creator" content="@CoopVegaReal" />
+  <style>
+    #header { background: #f3f3f3; color: #075e54; padding: 10px 20px; display: flex; align-items: center; }
+    #header img { height: 40px; margin-right: 10px; }
+    #header h1 { font-size: 20px; margin: 0; }
+    .top { background: #E9CB2D; font-size: 12.5px; font-weight: 300; padding: 6px;}
+    .bottom { background: #34673C; font-size: 12.5px; font-weight: 300; padding: 6px;}
+    html { max-width: 100%; overflow-x: hidden; margin: 0; padding: 0; height: 100%; max-width: 100%; overflow-x: hidden; display: flex; flex-direction: column;}
+    body { font-family: Arial, sans-serif; background: #e5ddd5; margin: 0; padding: 0; display: flex; flex-direction: column; height: 100%; max-width: 100%; overflow-x: hidden;}
+    #chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; height: 100%; }
+    #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; background: #f0f0f0; max-height: calc(100vh - 170px);}
+    .message { max-width: 60%; margin-bottom: 10px; padding: 10px 15px; border-radius: 15px; position: relative; font-size: 14px; background: #fff; }
+    .user { align-self: flex-end; background: #dcf8c6; border-bottom-right-radius: 0; }
+    .bot { align-self: flex-start; background: #ffffff; border-bottom-left-radius: 0; }
+    .sender { font-weight: bold; margin-bottom: 5px; font-size: 12px; }
+    .timestamp { display: block; font-size: 10px; text-align: right; margin-top: 5px; color: #999; }
+    #inputArea { display: flex; padding: 10px; background: #f0f0f0; flex-wrap: wrap; gap: 10px;}
+    #message { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; font-size: 16px; width: 100%; box-sizing: border-box;}
+    #send { margin-left: 10px; padding: 10px 20px; background: #25d366; color: white; border: none; border-radius: 20px; font-size: 16px; cursor: pointer; }
+    .typing { font-style: italic; color: #666; }
+    @media (min-width: 600px) {  
+        #message { width: auto; }  
+        #send { width: auto; }
+    }
+  </style>
+</head>
+<body>
+<div class="top"></div>
+    <div id="header">
+        <img src="https://cvr.com.do/wp-content/themes/vegareal/images/logo.png" alt="Cooperativa Vega Real" style="height: 40px; margin-right: 10px;">
+        <h1>Asistente Real[IA]</h1>
+      </div>
+<div class="bottom"></div>
+
+<div id="chat-container">
+  <div id="chat"></div>
+  
+
+<div id="inputArea">
+    <input type="text" id="message" placeholder="Escribe tu mensaje aquí..." autofocus>
+    <button id="send">Enviar</button>
+  </div>
+</div>
+<script>
+const chat = document.getElementById('chat');
+const messageInput = document.getElementById('message');
+const sendButton = document.getElementById('send');
+
+let modo = "normal";  
+let cliente_id = null;
+let ult_preg = null;
+let intentosOtp = 0;
+const MAX_INTENTOS_OTP = 3;
+const server = ""; //"http://realia.vegareal.local";
+function getCurrentTime() {
+  const now = new Date();
+  return now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
+}
+
+function addMessage(text, sender) {
+  const div = document.createElement('div');
+  div.className = 'message ' + sender;
+
+  let senderName = sender === 'user' ? 'Tú' : 'Real[IA]';
+
+  div.innerHTML = `
+    <div class="sender">${senderName}</div>
+    ${text.replace(/\n/g, '<br>')}
+    <span class="timestamp">${getCurrentTime()}</span>
+  `;
+  chat.appendChild(div);  
+  // Hacer scroll automático al final
+  setTimeout(() => {
+    chat.scrollTop = chat.scrollHeight;
+  }, 50);
+}
+
+function mostrarPensandoBienvenida() {
+  const div = document.createElement('div');
+  div.className = 'message bot typing';
+  div.id = 'pensando';
+  div.innerHTML = `
+    <div class="sender">Real[IA]</div>
+    Real[IA] está pensando<span id="dots">.</span>
+  `;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+
+  let dots = '.';
+  const intervalId = setInterval(() => {
+    dots = dots.length < 3 ? dots + '.' : '.';
+    const dotsSpan = document.getElementById('dots');
+    if (dotsSpan) dotsSpan.textContent = dots;
+  }, 500);
+
+  div.dataset.intervalId = intervalId;
+}
+
+function ocultarPensandoBienvenida() {
+  const pensandoDiv = document.getElementById('pensando');
+  if (pensandoDiv) {
+    clearInterval(pensandoDiv.dataset.intervalId);
+    pensandoDiv.remove();
+  }
+}
+
+// Mensaje de bienvenida con espera simulada
+window.addEventListener('load', () => {
+  mostrarPensandoBienvenida();
+  setTimeout(() => {
+    ocultarPensandoBienvenida();
+    addMessage("¡Hola! 👋 Bienvenido a Cooperativa Vega Real.\nSoy Real[IA], tu asistente virtual. ¿En qué puedo ayudarte hoy?", 'bot');
+  }, 2000);
+});
+
+function showTypingIndicator() {
+  typingIndicator = document.createElement('div');
+  typingIndicator.className = 'message bot typing';
+  typingIndicator.innerHTML = `
+    <div class="sender">Real[IA]</div>
+    está escribiendo<span id="dots"></span>
+  `;
+  chat.appendChild(typingIndicator);
+  chat.scrollTop = chat.scrollHeight;
+
+  let dots = '';
+  setInterval(() => {
+    dots = dots.length < 3 ? dots + '.' : '';
+    const dotsSpan = document.getElementById('dots');
+    if (dotsSpan) dotsSpan.textContent = dots;
+  }, 500);
+}
+
+function removeTypingIndicator() {
+  if (typingIndicator) {
+    typingIndicator.remove();
+    typingIndicator = null;
+  }
+}
+
+/////
+sendButton.addEventListener('click', async () => {
+  let text = messageInput.value.trim();
+  if (!text) return;
+  addMessage(text, 'user');
+  messageInput.value = '';
+  showTypingIndicator();  
+
+  // Modo normal (pregunta normal)
+  try {
+    
+    const response = await fetch(server + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        message: text
+      })
+    });
+
+    const data = await response.json();
+    removeTypingIndicator();
+    if (data.error) {
+      addMessage("Error: " + data.error, 'bot');
+    }
+  } catch (err) {
+    removeTypingIndicator();
+    addMessage("Error de conexión al servidor.", 'bot');
+  }
+});
+
+/////
+
+messageInput.addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    sendButton.click();
+  }
+});
+
+// Polling cada 2 segundos para recibir nuevas respuestas
+setInterval(async () => {
+  try {
+    const res = await fetch(server + '/webchat/mensajes');
+    const data = await res.json();
+    if (data.mensajes && data.mensajes.length > 0) {
+      removeTypingIndicator();
+      data.mensajes.forEach(msg => addMessage(msg, 'bot'));
+    }
+  } catch (err) {
+    console.error("Error consultando nuevos mensajes:", err);
+  }
+}, 3000);
+</script>
+</body>
+</html>

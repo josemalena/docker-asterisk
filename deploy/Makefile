@@ -37,6 +37,11 @@ down:
 destroy:
 	docker compose down -v
 
+rebuild:
+	docker compose down -v
+	docker compose up -d --remove-orphans
+	docker compose exec $(SRV_NAME) bash -c "fixssl ; /app/setup"
+
 config:
 	docker compose config
 
@@ -69,6 +74,9 @@ logs:
 
 sh:
 	docker compose exec $(SRV_NAME) bash
+
+root:
+	docker compose exec -it -u root $(SRV_NAME) bash
 
 cli:
 	docker compose exec $(SRV_NAME) $(CNT_CLI)

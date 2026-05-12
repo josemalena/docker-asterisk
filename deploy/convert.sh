@@ -1,0 +1,1 @@
+docker compose exec -u root -it ivr bash -c "cd /var/lib/asterisk/sounds/custom ; ffmpeg -y -hide_banner -loglevel error -i $F.aiff -ar 8000 $F.wav ; ls -lh $F.wav"

@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asistente Real[IA] - Cooperativa Vega Real</title>
+  <link rel="manifest" href="/push.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="WebPushTest">
+  <link rel="apple-touch-icon" href="/icons/icon-192x192.png">
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    #status { margin-top: 20px; padding: 10px; border: 1px solid #ccc; }
+    button { padding: 10px 15px; font-size: 16px; }
+    #iosPrompt {
+      display: none;
+      background: #fffbe6;
+      border: 1px solid #f0c36d;
+      padding: 15px;
+      margin-top: 20px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+    #iosPrompt img {
+      max-width: 100%;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+<h1>Asistente Real[IA] - Verificación Web Push</h1>
+<p>Este sitio verifica si tu navegador y dispositivo son compatibles con notificaciones push web.</p>
+
+<div id="status">Verificando...</div>
+<button id="btnNotificaciones" style="display:none">Activar notificaciones</button>
+
+<div id="iosPrompt">
+  📱 <strong>¿Quieres instalar esta app?</strong><br>
+  Pulsa el botón de compartir (<span style="font-size:24px;">🔗</span>) y luego <strong>"Agregar a pantalla de inicio"</strong>.<br>
+  <img src="/icons/instruccion-ios.png" alt="Instrucción para agregar a pantalla de inicio">
+</div>
+
+<script>
+  const statusDiv = document.getElementById("status");
+  const btn = document.getElementById("btnNotificaciones");
+  const iosPrompt = document.getElementById("iosPrompt");
+
+  function esIOS() {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  }
+
+  function esStandalone() {
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  }
+
+  async function verificarCompatibilidadPush() {
+    if (esIOS() && !esStandalone()) {
+      iosPrompt.style.display = "block";
+      statusDiv.innerText = "⚠️ Debes agregar la app a la pantalla de inicio para habilitar notificaciones push.";
+      return;
+    }
+
+    if (!('serviceWorker' in navigator)) {
+      statusDiv.innerText = "❌ Este navegador no soporta Service Workers.";
+      return;
+    }
+    if (!('PushManager' in window)) {
+      statusDiv.innerText = "❌ Este navegador no soporta PushManager.";
+      return;
+    }
+    if (!('Notification' in window)) {
+      statusDiv.innerText = "❌ Este navegador no soporta Notification API.";
+      return;
+    }
+
+    try {
+      const reg = await navigator.serviceWorker.register("/pwa/sw.js");
+      statusDiv.innerText = "✅ Compatible. Listo para solicitar notificaciones.";
+      btn.style.display = "inline-block";
+    } catch (e) {
+      statusDiv.innerText = "❌ Error registrando Service Worker: " + e.message;
+    }
+  }
+
+  btn.addEventListener("click", async () => {
+    const permiso = await Notification.requestPermission();
+    if (permiso === 'granted') {
+      statusDiv.innerText = "✅ Permiso concedido para notificaciones.";
+    } else {
+      statusDiv.innerText = "❌ Permiso denegado o cancelado.";
+    }
+  });
+
+  verificarCompatibilidadPush();
+</script>
+</body>
+</html>

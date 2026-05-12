@@ -1,0 +1,123 @@
+{
+  "raiz": {
+    "header": "Real[IA] - Cooperativa Vega Real",
+    "body": "¡Hola! Soy tu asistente. ¿En qué te puedo ayudar hoy?",
+    "footer": "Selecciona una opción o escríbeme tu pregunta",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Menú principal",
+        "rows": [
+          { "id": "MENU:feria",                                                              "title": "Feria Madre Feliz" },
+          { "id": "MENU:productos",                                                          "title": "Productos" },
+          { "id": "MENU:servicios",                                                          "title": "Servicios sociales" },
+          { "id": "INTENT:sucursal|¿Dónde están las sucursales y horarios?",                 "title": "Sucursales" },
+          { "id": "MENU:cooperativa",                                                        "title": "Sobre la cooperativa" },
+          { "id": "OTP:saldo|Quiero ver el balance de mis cuentas, prestamos y certificados","title": "Mis productos" }
+        ]
+      }
+    ]
+  },
+  "feria": {
+    "header": "Expo Feria Madre Feliz",
+    "body": "Festival de créditos con precios especiales durante todo el mes de mayo. ¿Qué necesitas?",
+    "footer": "Casa Club Vega Real - Bayacanes",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Feria Madre Feliz",
+        "rows": [
+          { "id": "INFO:feria_horarios",                                    "title": "Horarios y ubicación" },
+          { "id": "INFO:feria_expositores",                                 "title": "Expositores" },
+          { "id": "MENU:prestamos_feria",                                   "title": "Préstamos de feria" },
+          { "id": "OTP:feria|Quiero ver el estado de mi préstamo de feria", "title": "Mi préstamo" },
+          { "id": "MENU:raiz",                                              "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "prestamos_feria": {
+    "header": "Préstamos de Feria",
+    "body": "Selecciona el tipo de financiamiento sobre el que quieres saber más:",
+    "footer": "Todos requieren ser asociado activo",
+    "button": "Ver tipos",
+    "sections": [
+      {
+        "title": "Tipos de préstamo",
+        "rows": [
+          { "id": "INTENT:producto|Préstamo de feria para electrodomésticos y muebles", "title": "Electrodomésticos" },
+          { "id": "INTENT:producto|Préstamo de feria para materiales de construcción",  "title": "Materiales constr." },
+          { "id": "INTENT:producto|Préstamo de feria para motocicletas",                "title": "Motocicletas" },
+          { "id": "INTENT:producto|Préstamo de feria para vehículos usados",            "title": "Vehículos usados" },
+          { "id": "INTENT:producto|Préstamo de feria para vehículos nuevos",            "title": "Vehículos nuevos" },
+          { "id": "INTENT:producto|Préstamo de feria para vivienda económica",          "title": "Vivienda económica" },
+          { "id": "INTENT:producto|Préstamo de feria hipotecario general",              "title": "Hipotecario" },
+          { "id": "INTENT:producto|Préstamo de feria para paneles solares",             "title": "Paneles solares" },
+          { "id": "INTENT:producto|Préstamo de feria para microempresas",               "title": "Microempresas" },
+          { "id": "INTENT:producto|Préstamo de feria agropecuario",                     "title": "Agropecuario" }
+        ]
+      }
+    ]
+  },
+  "productos": {
+    "header": "Productos y Servicios",
+    "body": "¿Sobre qué categoría quieres saber más?",
+    "button": "Ver productos",
+    "sections": [
+      {
+        "title": "Productos",
+        "rows": [
+          { "id": "INTENT:producto|producto/prestamo/hipotecario producto/prestamo/comercial producto/prestamo/consumo", "title": "Préstamos" },
+          { "id": "INTENT:producto|producto/cuenta/aportaciones producto/cuenta/cuenta_ahorro_retirable producto/cuenta/cuenta_ahorro_infantil producto/cuenta/orden_pago producto/cuenta/nomina_electronica producto/cuenta/tarjeta_debito_real producto/cuenta/coop_san_real", "title": "Cuentas" },
+          { "id": "INTENT:producto|producto/certificado/certificado_financiero", "title": "Certificados" },
+          { "id": "INTENT:producto|producto/tarifa/servicios producto/tarifa/otros", "title": "Tarifas" },
+          { "id": "INTENT:producto|producto/membresia/distrital_comunitaria producto/membresia/distrital_empresarial producto/membresia/distrital_por_agencia producto/membresia/infantil", "title": "Membresía" },
+          { "id": "MENU:raiz",                                                                    "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "servicios": {
+    "header": "Servicios Sociales",
+    "body": "Beneficios y servicios para ti y tu familia:",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Servicios",
+        "rows": [
+          { "id": "INTENT:servicio|servicio/salud/plan_farmacia",       "title": "Plan farmacia" },
+          { "id": "INTENT:servicio|servicio/salud/plan_odontologico",   "title": "Plan odontológico" },
+          { "id": "INTENT:servicio|servicio/salud/plan_funeral",        "title": "Plan funeral" },
+          { "id": "INTENT:servicio|servicio/salud/consultorio_medico",  "title": "Consultorio médico" },
+          { "id": "INTENT:servicio|servicio/salud/farmacia servicio/salud/odontologia", "title": "Farmacias y clínicas" },
+          { "id": "INTENT:servicio|servicio/recreacion/casa_club",      "title": "Casa Club / Recreación" },
+          { "id": "INTENT:servicio|servicio/social/educacion_cooperativa servicio/social/educacion_ecologica", "title": "Educación cooperativa" },
+          { "id": "MENU:raiz",                                                                  "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "cooperativa": {
+    "header": "Sobre la Cooperativa",
+    "body": "Conoce más sobre Cooperativa Vega Real:",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Cooperativa Vega Real",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/historia/fundacion empresa/filosofia/mision empresa/filosofia/vision empresa/filosofia/valores", "title": "Historia y filosofía" },
+          { "id": "INTENT:empresa|empresa/asociado/afiliarse empresa/asociado/porque_afiliarse empresa/asociado/requisitos", "title": "Cómo afiliarme" },
+          { "id": "INTENT:empresa|empresa/asociado/beneficios_socio", "title": "Beneficios de ser socio" },
+          { "id": "INTENT:empresa|empresa/contacto/correo empresa/contacto/sitio_web empresa/contacto/telefono empresa/contacto/url_app empresa/contacto/url_cvrnet", "title": "Contacto y canales" },
+          { "id": "INTENT:empresa|empresa/estructura/asamblea empresa/estructura/consejo_administracion empresa/estructura/consejo_vigilancia empresa/estructura/cooperativa empresa/estructura/distrito", "title": "Estructura" },
+          { "id": "INTENT:empresa|empresa/politica/calidad empresa/politica/genero empresa/politica/responsabilidad_social", "title": "Políticas" },
+          { "id": "MENU:raiz",                                                                  "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "info": {
+    "feria_horarios": "*Expo Feria Madre Feliz*\n\n📅 Del 1 al 31 de mayo\n📍 Casa Club Vega Real\nC/ Federico Basilis, Bayacanes, La Vega\n☎ 809-573-4258\n\n*Horarios:*\n• Lunes a Viernes: 10:00 am - 9:00 pm\n• Sábados: 9:00 am - 9:00 pm\n• Domingos: 9:00 am - 8:00 pm\n\n🌐 https://expoferiamadrefeliz.cvr.com.do\n\nEscribe *menu* para volver al menú principal.",
+    "feria_expositores": "Para conocer todos los expositores y aliados comerciales de la Expo Feria Madre Feliz, visita:\n\n🌐 https://expoferiamadrefeliz.cvr.com.do\n\nEscribe *menu* para volver al menú principal."
+  }
+}

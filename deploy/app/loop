@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# Bucle infinito que imprime un mensaje cada 5 segundos
+while true; do
+    echo "Ejecutando bucle..."
+    sleep 5
+done
