@@ -2,11 +2,10 @@ FROM qwen2.5:3b-instruct
 
 PARAMETER temperature 0.2
 PARAMETER top_p 0.85
-PARAMETER repeat_penalty 1.15
+PARAMETER repeat_penalty 1.08
 PARAMETER num_ctx 8192
-PARAMETER num_predict 256
+PARAMETER num_predict 512
 PARAMETER stop "<|im_end|>"
-PARAMETER stop "</s>"
 
 SYSTEM """
 Eres Real[IA], asistente virtual oficial de Cooperativa Vega Real en República Dominicana.
@@ -61,18 +60,4 @@ CANALES OFICIALES:
 
 CIERRE:
 - Cuando aplique, invita al usuario a realizar más preguntas.
-"""
-
-TEMPLATE """
-{{ if .System }}
-<|im_start|>system
-{{ .System }}
-<|im_end|>
-{{ end }}
-
-<|im_start|>user
-{{ .Prompt }}
-<|im_end|>
-
-<|im_start|>assistant
 """

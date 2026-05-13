@@ -1,0 +1,1 @@
+ollama create realia-cvr -f Modelfile

@@ -334,7 +334,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                         redisdb.set_variable(numero, "message_id", message_id)
                         redisdb.set_variable(numero, "modo", "menu")
                         enviar_respuesta(canal, message_id, numero,
-                            "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula.")
+                            "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones).")
                     return
 
         if len(mensaje_original) > 0 :
@@ -344,7 +344,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                 if intencion_val == "cancelar":
                     limpiar_estado_validacion(numero)
                     enviar_respuesta(canal, message_id, numero,
-                        "Listo, cancelé la solicitud. Escribe *menu* para ver opciones o pregúntame otra cosa cuando quieras.")
+                        "Listo, cancelé la solicitud. Escribe *menu* para ver opciones") # o pregúntame otra cosa cuando quieras.
                     return
                 if intencion_val == "agente":
                     enviar_respuesta(canal, message_id, numero, mensaje_contacto_humano())
@@ -514,7 +514,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                     redisdb.set_variable(numero, "intencion_pendiente", intent)
                     redisdb.set_variable(numero, "pregunta_original", mensaje)
                     redisdb.set_variable(numero, "message_id", message_id)
-                    respuesta = "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula."
+                    respuesta = "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones)."
                 # Descomentar para responder sin usar IA
                 elif tipo == 'ayuda':
                     respuesta = contexto[0]["contenido"]
@@ -615,60 +615,22 @@ def enviar_respuesta_web(message_id, session_id, respuesta):
     redisdb.add_web_message(session_id, message_id, respuesta)
     notify(session_id, respuesta)
 
-def llamada_llm(session_id, intencion, pregunta, contexto_str, is_payload = False):   
+def llamada_llm(session_id, intencion, pregunta, contexto_str, is_payload = False):
     try:
         logg(f"llamada_llm: Inicio '{intencion}' '{pregunta}'\r\n{contexto_str}")
-        inicio = time.time()        
+        inicio = time.time()
         chat = ConversationManager(session_id)
-        conversacion = json.dumps(chat.get_conversation_history(), ensure_ascii=True)
-        #contexto_str = json.dumps(contexto, ensure_ascii=True)
+        conversacion = json.dumps(chat.get_conversation_history(), ensure_ascii=False)
         conocimiento_extra = ""
         if not str(contexto_str).strip():
             conocimiento_extra = load_jsonl_from_file("context_cvr.jsonl")
-        #if intencion == 'producto':
-        #    respuesta = ""
-            #for l in contexto:
-            #    respuesta += f"\n- {l['nombre']}: {l['contenido']}"
-            # respuesta
-        
+
         respuesta = preguntar_llm(intencion, pregunta, contexto_str, conversacion, conocimiento_extra, max_reintentos=2, modelo=OLLAMA_MODEL, endpoint=OLLAMA_URL, is_payload = is_payload)
         respuesta = respuesta.strip()
-        #logg(f"llamada_llm: Inicio 8")
         fin_ = fin(inicio)
         logg(f"llamada_llm: Resultado tiempo {fin_}")
         return respuesta
-        if intencion == 'direccion':
-            if contexto:
-                c = 0
-                for suc in contexto:
-                    c += 1
-                    if len(contexto) == 1 :
-                        if {suc['nombre']} == "Central":
-                            respuesta = f"La {suc['nombre']} se encuentra en la {suc['direccion']}. Puedes contactarla al número {', '.join(suc['telefonos'])}. Las extensiones son {', '.join(suc['extensiones'])}. Recuerda que la sucursal está abierta de {', '.join(suc['horario'])}."    
-                        else:
-                            respuesta = f"La sucursal de {suc['nombre']} se encuentra en la {suc['direccion']}. Puedes contactarla al número {', '.join(suc['telefonos'])}. Las extensiones son {', '.join(suc['extensiones'])}. Recuerda que la sucursal está abierta de {', '.join(suc['horario'])}."
-                    else:
-                        if c == 1 :
-                           respuesta = "Listado de sucursales:\n"
-                        respuesta += f"\n- {suc['nombre']}: {suc['direccion']}. Tel: {', '.join(suc['telefonos'])}."
-                return respuesta
-        elif intencion == 'asociado':
-            if contexto:
-                for req in contexto:
-                    #respuesta = f"Para ser un asociado de Vega Real debes: \r\n - {', '.join(req['requisitos'])}."
-                    respuesta = "Para ser un asociado de Vega Real debes:\n" + "\n".join(f"- {req}" for req in contexto['requisitos'])
-                    respuesta += "\n\nSi quieres saber cuál es la sucursal más cercana, puedes preguntarme las direcciones de las sucursales."
-                    return respuesta
-        elif intencion == 'capacidades':
-            conocimiento_extra = conocimiento_general(None)
-        respuesta = preguntar_llm(intencion, pregunta, contexto, conocimiento_extra, max_reintentos=2, modelo=OLLAMA_MODEL, endpoint=OLLAMA_URL)
-        respuesta = respuesta.strip()
-        chat.add_user_message(pregunta)
-        chat.add_assistant_message(respuesta)
-        fin_ = fin(inicio)
-        logg(f"llamada_llm: Resultado tiempo {fin_}")
-        return respuesta
-        
+
     except Exception as e:
         logx(e)
         return "Estamos presentando inconvenientes, por favor intenta en unos minutos"
@@ -1183,6 +1145,17 @@ def detect_intent(query: str) -> str:
 
     return 'general'
 
+def _stem_es(w):
+    """Stemmer mínimo para tolerar plurales en español.
+    - 'materiales' -> 'material', 'paneles' -> 'panel' (consonante + 'es').
+    - 'agropecuarios' -> 'agropecuario', 'motocicletas' -> 'motocicleta', 'viajes' -> 'viaje' (vocal + 's').
+    Aplica con longitud mínima para evitar sobre-stem."""
+    if len(w) > 4 and w.endswith('es') and w[-3] not in 'aeiouáéíóú':
+        return w[:-2]
+    if len(w) > 3 and w.endswith('s'):
+        return w[:-1]
+    return w
+
 def extract_entities(intent, query: str) -> Dict:
     query = normalize_text(query)
     logg(f"extract_entities('{intent}', '{query}')")
@@ -1191,34 +1164,35 @@ def extract_entities(intent, query: str) -> Dict:
     local_entities = load_jsonl_from_file('entities.jsonl')
     max_coincidencias = 0
     match_found = 0
+    palabras_frase = {_stem_es(w) for w in query.split()}
     for item in local_entities:
-        if intent == item["tipo"]:
-            #logg(f"extract_entities: item: {item} in '{query}'")
-            for campo in ['tipo', 'subtipo', 'valor', 'nombre', 'descripcion', 'contenido', 'fecha', 'municipio', 'provincia', 'pais', 'telefonos', 'extensiones']:
-                if campo in item:
-                    try:
-                        palabras_clave = []
-                        for v in item.values():
-                            #logg(f"extract_entities: v = {v}")
-                            palabras_clave.extend(v.lower().replace('_', ' ').split())
-                        palabras_frase = query.split()
-                        coincidencias = sum(1 for palabra in palabras_clave if palabra in palabras_frase)
-                        if coincidencias > 0:                            
-                            if coincidencias >= max_coincidencias:
-                                max_coincidencias = coincidencias
-                                matchs[match_found] = {"coincidencias": coincidencias, "entity": item}
-                                match_found += 1
-                                logg(f"extract_entities: Coincidencias {palabras_clave} -> {palabras_frase} :: encontradas: {coincidencias}")
-                            
-                    except AttributeError as e:
-                        loge(f"extract_entities: Error {e}")
-                        pass # No pude determinar coincidencias
-                    campo_arr = normalize_text(str(item[campo])).split("_")
-                    for c in campo_arr:
-                        #logg(f"extract_entities: '{intent}' campo: {campo} = '{c}'  in '{query}'")
-                        if c in query:
-                            found.append(item)
-                            logg(f"extract_entities: {campo} found: {item} -> '{c}' in '{query}'")
+        if intent != item.get("tipo"):
+            continue
+        # Construir palabras_clave UNA sola vez por item: dedup + stemming + split por '/' y '_'.
+        palabras_clave = set()
+        for v in item.values():
+            if not isinstance(v, str):
+                continue
+            for w in v.lower().replace('_', ' ').replace('/', ' ').split():
+                palabras_clave.add(_stem_es(w))
+        coincidencias = len(palabras_clave & palabras_frase)
+        if coincidencias > 0 and coincidencias >= max_coincidencias:
+            max_coincidencias = coincidencias
+            matchs[match_found] = {"coincidencias": coincidencias, "entity": item}
+            match_found += 1
+            logg(f"extract_entities: {coincidencias} pts {sorted(palabras_clave & palabras_frase)} item={item}")
+        # Camino paralelo (substring match) preservado para llenar 'found' cuando matchs venga vacío.
+        for campo in ['tipo', 'subtipo', 'valor', 'nombre', 'descripcion', 'contenido', 'fecha', 'municipio', 'provincia', 'pais', 'telefonos', 'extensiones']:
+            if campo not in item:
+                continue
+            try:
+                campo_arr = normalize_text(str(item[campo])).split("_")
+                for c in campo_arr:
+                    if c and c in query:
+                        found.append(item)
+                        logg(f"extract_entities: {campo} found: {item} -> '{c}' in '{query}'")
+            except AttributeError as e:
+                loge(f"extract_entities: Error {e}")
     if matchs:
        # Determinar la coincidencia máxima
         max_coincidencias = max(item['coincidencias'] for item in matchs.values())
@@ -1259,7 +1233,8 @@ def llama_ollama(endpoint, modelo, prompt):
         response = requests.post(endpoint, json={
             "model": modelo,
             "prompt": prompt,
-            "stream": False
+            "stream": False,
+            "keep_alive": "30m"
         })
 
         if response.status_code != 200:
@@ -1285,7 +1260,7 @@ def llama_openai(endpoint, modelo, prompt):
     }
     payload = {
         "model": modelo,
-        "store": True,
+        "keep_alive": "30m",
         "messages": [
             {"role": "user", "content": prompt}
         ]

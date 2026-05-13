@@ -40,8 +40,8 @@
 {"tipo": "producto", "subtipo": "prestamo", "valor": "comercial", "ruta": "producto/prestamo/comercial"}
 {"tipo": "producto", "subtipo": "prestamo", "valor": "consumo", "ruta": "producto/prestamo/consumo"}
 {"tipo": "producto", "subtipo": "prestamo", "valor": "feria_madre_feliz", "ruta": "producto/prestamo/feria_madre_feliz"}
-{"tipo": "producto", "subtipo": "prestamo_feria", "valor": "electrodomesticos_muebles", "ruta": "producto/prestamo_feria/electrodomesticos_y_muebles"}
-{"tipo": "producto", "subtipo": "prestamo_feria", "valor": "materiales_construccion", "ruta": "producto/prestamo_feria/materiales_de_construccion"}
+{"tipo": "producto", "subtipo": "prestamo_feria", "valor": "electrodomesticos_muebles", "ruta": "producto/prestamo_feria/electrodomesticos_muebles"}
+{"tipo": "producto", "subtipo": "prestamo_feria", "valor": "materiales_construccion", "ruta": "producto/prestamo_feria/materiales_construccion"}
 {"tipo": "producto", "subtipo": "prestamo_feria", "valor": "motocicletas", "ruta": "producto/prestamo_feria/motocicletas"}
 {"tipo": "producto", "subtipo": "prestamo_feria", "valor": "vehiculos_usados", "ruta": "producto/prestamo_feria/vehiculos_usados"}
 {"tipo": "producto", "subtipo": "prestamo_feria", "valor": "vehiculos_nuevos", "ruta": "producto/prestamo_feria/vehiculos_nuevos"}

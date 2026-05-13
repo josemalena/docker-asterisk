@@ -313,7 +313,9 @@ AGENCIAS = """
             ORDER BY TO_NUMBER(REPLACE(a.cod_agencia, '0',''))"""
 
 ARTICULOS_FERIA = """
-a.CLIENTE AS COD_CLIENTE), XMLFOREST(a.CLIENTE AS COD_CLIENTE, a.COD_ART, b.NOMBRE_SERVICIO AS DESCRIPCION, c.NOMBRE_RECAUDADOR AS SUPLIDOR,
+a.CLIENTE AS COD_CLIENTE), XMLFOREST(a.CLIENTE AS COD_CLIENTE, a.COD_ART, 
+TRIM(decode(b.NOMBRE_SERVICIO,d.num_id, 'MATERIALES ' || c.NOMBRE_RECAUDADOR, b.NOMBRE_SERVICIO)) AS DESCRIPCION, 
+c.NOMBRE_RECAUDADOR AS SUPLIDOR,
 a.FEC_DESPA AS FECHA_DESPACHADO, a.FEC_ENTRE AS FECHA_ENTREGA, a.CANT_ART AS CANTIDAD_ARTICULO,
  DECODE(
         a.estado,
@@ -322,13 +324,16 @@ a.FEC_DESPA AS FECHA_DESPACHADO, a.FEC_ENTRE AS FECHA_ENTREGA, a.CANT_ART AS CAN
         'E', 'Entregado',
         'F', 'Facturado', 'Otro ' || a.estado
     ) AS ESTADO_ARTICULO)).GETCLOBVAL()
-FROM CJ.TAHAWAII a, CJ.BCJ_CONTRATO_SERVICIO b, CJ.BCJ_RECAUDADORES c
+FROM CJ.TAHAWAII a, CJ.BCJ_CONTRATO_SERVICIO b, CJ.BCJ_RECAUDADORES c, PA.CAPTURA_CLIENTE d
 WHERE TO_CHAR(TO_DATE(a.FECTRAN,'dd/mm/yyyy'),'yyyy') = TO_CHAR(SYSDATE,'yyyy')
   AND a.COD_SUP = b.CODIGO_RECAUDADOR
   AND a.COD_ART = b.CODIGO_SERVICIO
   AND a.ESTADO NOT IN ('C')
+  AND c.CODIGO_RECAUDADOR NOT IN ('454','13', '936', '90', '995')
+  AND c.ESTADO = 'A'
   AND a.ASIENTO IS NOT NULL
   AND c.CODIGO_RECAUDADOR =  b.CODIGO_RECAUDADOR
+  AND a.CLIENTE = d.COD_PERSONA
   AND a.CLIENTE = :cod_cliente
 """
 
@@ -851,6 +856,13 @@ def resumen_agencias(xml_str):
     resumen.append(f"En total Vega Real tiene {x} sucursales y una oficina de representación")
     return "\n".join(resumen)
 
+def _clasificar_producto_cuenta(descripcion):
+    """Determina si una DESCRIPCION_PRODUCTO corresponde a 'certificado' o 'cuenta'."""
+    d = (descripcion or "").lower()
+    if "certificado" in d or "plazo fijo" in d or "deposito a plazo" in d or "depósito a plazo" in d:
+        return "certificado"
+    return "cuenta"
+
 def resumen_cuentas(xml_str, entidad):
     if not xml_str:
         return ""
@@ -867,15 +879,16 @@ def resumen_cuentas(xml_str, entidad):
         if estado != "Inactiva":
             logg(f"resumen_cuentas: Verificando '{entidad}' -> '{producto}'")
             prod = producto.lower().strip().split(" ")
-            if any(entidad in palabra for palabra in prod) or entidad == "cuentas":
-                logg(f"resumen_cuentas: OK '{entidad}' -> {producto}")            
+            if any(entidad in palabra for palabra in prod) or entidad in ("cuentas", "certificados"):
+                subtipo = _clasificar_producto_cuenta(producto)
+                logg(f"resumen_cuentas: OK '{entidad}' -> {producto} (subtipo={subtipo})")
                 result = {
-                    "tipo": "producto", "subtipo": "cuenta", "moneda": "RD$", "descripcion_moneda": "Pesos", "codigo_moneda": "DOP",
+                    "tipo": "producto", "subtipo": subtipo, "moneda": "RD$", "descripcion_moneda": "Pesos", "codigo_moneda": "DOP",
                     "numero_producto": enmascarar_pci(numero),
                     "fecha_apertura": fecha_apertura,
                     "estado": estado,
                     "saldo_total": float(saldo),
-                    "saldo_formateado" : moneda(float(saldo)),                    
+                    "saldo_formateado" : moneda(float(saldo)),
                     "descripcion": producto,
                     "nombre_asociado" : datos_cliente["nombres"]
                 }
@@ -1008,6 +1021,10 @@ def contexto_cliente(cliente, query):
             elif entidad == "prestamo_feria" or  entidad == "articulo_feria":
                 logg("Consultando datos feria..")
                 articulos = resumen_feria(ejecuta("Articulo", ARTICULOS_FERIA, cliente), producto)
+                #if cliente == "37710":
+                #    articulos = resumen_feria(ejecuta("Articulo", ARTICULOS_FERIA, "111930"), producto)
+                #else:
+                #    articulos = resumen_feria(ejecuta("Articulo", ARTICULOS_FERIA, cliente), producto)
                 if articulos:
                     datos.append(articulos)
         

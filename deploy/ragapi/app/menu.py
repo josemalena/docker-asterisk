@@ -91,6 +91,44 @@ def split_intent_query(valor: str) -> Tuple[str, str]:
     return (valor.strip(), "")
 
 
+_INTROS_MARKETING = {
+    ('producto','cuenta'):         ("Te presentamos esta cuenta:", "Te presentamos nuestras cuentas:"),
+    ('producto','prestamo'):       ("Conoce este tipo de préstamo:", "Nuestros préstamos te apoyan en cada etapa:"),
+    ('producto','prestamo_feria'): ("Conoce este financiamiento de la Expo Feria Madre Feliz:", "Nuestros financiamientos especiales de la Expo Feria Madre Feliz:"),
+    ('producto','certificado'):    ("Conoce nuestro Certificado Financiero:", "Conoce nuestros Certificados Financieros:"),
+    ('producto','tarifa'):         ("Estas son nuestras tarifas vigentes:", "Estas son nuestras tarifas vigentes:"),
+    ('producto','membresia'):      ("Conoce este tipo de membresía:", "Tenemos estos tipos de membresía:"),
+    ('producto','solicitud'):      ("Así puedes solicitarlo:", "Así puedes solicitarlo:"),
+    ('producto','requisito'):      ("Estos son los requisitos:", "Estos son los requisitos:"),
+    ('producto','proceso'):        ("Estos son los pasos:", "Estos son los pasos:"),
+    ('servicio','salud'):          ("Te ofrecemos este servicio de salud:", "Nuestros servicios de salud para ti:"),
+    ('servicio','recreacion'):     ("Disfruta de este beneficio recreativo:", "Disfruta de nuestros beneficios recreativos:"),
+    ('servicio','social'):         ("Conoce este programa social:", "Nuestros programas sociales:"),
+    ('empresa','identidad'):       ("Sobre nosotros:", "Sobre nosotros:"),
+    ('empresa','historia'):        ("Nuestra historia:", "Nuestra historia:"),
+    ('empresa','filosofia'):       ("Nuestra filosofía:", "Nuestra filosofía:"),
+    ('empresa','asociado'):        ("Información para asociados:", "Información para asociados:"),
+    ('empresa','contacto'):        ("Estamos para servirte:", "Estamos para servirte. Nuestros canales:"),
+    ('empresa','estructura'):      ("Sobre nuestra organización:", "Sobre nuestra organización:"),
+    ('empresa','politica'):        ("Nuestro compromiso institucional:", "Nuestros compromisos institucionales:"),
+    ('sucursal','direccion'):      ("Esta es nuestra oficina:", "Estas son nuestras oficinas:"),
+}
+
+def _intro_marketing(contexto):
+    """Devuelve un encabezado en tono profesional/marketing basado en tipo/subtipo
+    del primer item del contexto. Usa singular si hay 1 item, plural si hay varios."""
+    if not isinstance(contexto, list) or not contexto:
+        return None
+    primero = next((c for c in contexto if isinstance(c, dict)), None)
+    if not primero:
+        return None
+    par = (primero.get('tipo'), primero.get('subtipo'))
+    intros = _INTROS_MARKETING.get(par)
+    if not intros:
+        return None
+    return intros[0] if len(contexto) == 1 else intros[1]
+
+
 def formatear_contexto_general(contexto, limite: int = 8) -> Optional[str]:
     """Renderiza una lista de entradas de context_cvr.jsonl como texto WhatsApp.
 
@@ -147,16 +185,20 @@ def formatear_contexto_general(contexto, limite: int = 8) -> Optional[str]:
 
     if not partes:
         return None
-    return "\n\n".join(partes)
+    cuerpo = "\n\n".join(partes)
+    intro = _intro_marketing(contexto)
+    return f"{intro}\n\n{cuerpo}" if intro else cuerpo
 
 
 def formatear_contexto_personal(contexto) -> str:
-    """Renderiza los productos del cliente (cuentas, créditos, artículos de feria)."""
+    """Renderiza los productos del cliente agrupados por categoría
+    (Préstamos, Certificados, Cuentas, Artículos de Feria) con saludo personalizado."""
     import json as _json
 
-    if not contexto:
-        return "No encontramos información asociada a tu cuenta."
+    sin_datos = "No encontramos productos activos asociados a tu cuenta. Si crees que es un error, comunícate con la cooperativa."
 
+    if not contexto:
+        return sin_datos
     productos = contexto
     if isinstance(productos, str):
         try:
@@ -166,35 +208,62 @@ def formatear_contexto_personal(contexto) -> str:
     if isinstance(productos, dict):
         productos = [productos]
     if not isinstance(productos, list) or not productos:
-        return "No encontramos información asociada a tu cuenta."
+        return sin_datos
 
-    partes = []
+    grupos = {"prestamo": [], "certificado": [], "cuenta": [], "feria": []}
+    nombre_asociado = None
     for p in productos:
         if not isinstance(p, dict):
             continue
-        subtipo = p.get("subtipo", "")
-        balance = p.get("saldo_formateado", "")
-
-        if subtipo == "prestamo_feria" or p.get("tipo") == "articulo":
-            nombre = p.get("descripcion_articulo") or "Artículo de feria"
-            estado = p.get("estado_articulo", "")
-            bloque = f"*{nombre}*"
-            if estado:
-                bloque += f"\nEstado: {estado}"
-            partes.append(bloque)
-        elif subtipo in ("cuenta", "credito", "prestamo"):
-            nombre = p.get("descripcion") or subtipo.title()
-            bloque = f"*{nombre}*"
-            if balance:
-                bloque += f"\nBalance: {balance}"
-            partes.append(bloque)
+        if not nombre_asociado:
+            nombre_asociado = p.get("nombre_asociado")
+        subtipo = (p.get("subtipo") or "").lower()
+        tipo = (p.get("tipo") or "").lower()
+        if subtipo == "prestamo_feria" or tipo == "articulo":
+            grupos["feria"].append(p)
+        elif subtipo in ("prestamo", "credito"):
+            grupos["prestamo"].append(p)
+        elif subtipo == "certificado":
+            grupos["certificado"].append(p)
+        elif subtipo == "cuenta":
+            grupos["cuenta"].append(p)
         else:
-            nombre = p.get("nombre") or p.get("descripcion") or subtipo or "Producto"
-            bloque = f"*{nombre}*"
-            if balance:
-                bloque += f"\nBalance: {balance}"
-            partes.append(bloque)
+            grupos["cuenta"].append(p)
 
-    if not partes:
-        return "No encontramos información asociada a tu cuenta."
-    return "\n\n".join(partes)
+    if not any(grupos.values()):
+        return sin_datos
+
+    primer_nombre = (nombre_asociado or "").strip().split(" ")[0]
+    if primer_nombre:
+        saludo = f"¡Hola {primer_nombre}! Este es el resumen de tus productos en Vega Real:"
+    else:
+        saludo = "Este es el resumen de tus productos en Vega Real:"
+
+    def _linea_producto(p):
+        nombre = p.get("descripcion") or "Producto"
+        balance = p.get("saldo_formateado", "")
+        if balance:
+            return f"• {nombre} — Balance: {balance}"
+        return f"• {nombre}"
+
+    def _linea_feria(p):
+        nombre = p.get("descripcion_articulo") or "Artículo de feria"
+        estado = (p.get("estado_articulo") or "").strip()
+        if estado:
+            return f"• {nombre} — Estado: {estado}"
+        return f"• {nombre}"
+
+    bloques = [saludo]
+    secciones = [
+        ("*Préstamos*",          grupos["prestamo"],    _linea_producto),
+        ("*Certificados*",       grupos["certificado"], _linea_producto),
+        ("*Cuentas*",            grupos["cuenta"],      _linea_producto),
+        ("*Artículos de Feria*", grupos["feria"],       _linea_feria),
+    ]
+    for header, items, formatter in secciones:
+        if not items:
+            continue
+        lineas = [header] + [formatter(p) for p in items]
+        bloques.append("\n".join(lineas))
+
+    return "\n\n".join(bloques)

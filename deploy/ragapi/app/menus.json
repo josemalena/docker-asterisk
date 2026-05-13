@@ -2,7 +2,7 @@
   "raiz": {
     "header": "Real[IA] - Cooperativa Vega Real",
     "body": "¡Hola! Soy tu asistente. ¿En qué te puedo ayudar hoy?",
-    "footer": "Selecciona una opción o escríbeme tu pregunta",
+    "footer": "Selecciona una opción",
     "button": "Ver opciones",
     "sections": [
       {
@@ -20,7 +20,7 @@
   },
   "feria": {
     "header": "Expo Feria Madre Feliz",
-    "body": "Festival de créditos con precios especiales durante todo el mes de mayo. ¿Qué necesitas?",
+    "body": "Festival de créditos con precios especiales durante todo el mes de mayo. ¿En qué te podemos ayudar?",
     "footer": "Casa Club Vega Real - Bayacanes",
     "button": "Ver opciones",
     "sections": [
@@ -38,48 +38,116 @@
   },
   "prestamos_feria": {
     "header": "Préstamos de Feria",
-    "body": "Selecciona el tipo de financiamiento sobre el que quieres saber más:",
+    "body": "Estos son nuestros financiamientos especiales de la Expo Feria Madre Feliz:",
     "footer": "Todos requieren ser asociado activo",
     "button": "Ver tipos",
     "sections": [
       {
         "title": "Tipos de préstamo",
         "rows": [
-          { "id": "INTENT:producto|Préstamo de feria para electrodomésticos y muebles", "title": "Electrodomésticos" },
-          { "id": "INTENT:producto|Préstamo de feria para materiales de construcción",  "title": "Materiales constr." },
-          { "id": "INTENT:producto|Préstamo de feria para motocicletas",                "title": "Motocicletas" },
-          { "id": "INTENT:producto|Préstamo de feria para vehículos usados",            "title": "Vehículos usados" },
-          { "id": "INTENT:producto|Préstamo de feria para vehículos nuevos",            "title": "Vehículos nuevos" },
-          { "id": "INTENT:producto|Préstamo de feria para vivienda económica",          "title": "Vivienda económica" },
-          { "id": "INTENT:producto|Préstamo de feria hipotecario general",              "title": "Hipotecario" },
-          { "id": "INTENT:producto|Préstamo de feria para paneles solares",             "title": "Paneles solares" },
-          { "id": "INTENT:producto|Préstamo de feria para microempresas",               "title": "Microempresas" },
-          { "id": "INTENT:producto|Préstamo de feria agropecuario",                     "title": "Agropecuario" }
+          { "id": "INTENT:producto|producto/prestamo_feria/electrodomesticos_muebles", "title": "Electrodomésticos" },
+          { "id": "INTENT:producto|producto/prestamo_feria/materiales_construccion",   "title": "Materiales construcci." },
+          { "id": "INTENT:producto|producto/prestamo_feria/motocicletas",              "title": "Motocicletas" },
+          { "id": "INTENT:producto|producto/prestamo_feria/vehiculos_usados",          "title": "Vehículos usados" },
+          { "id": "INTENT:producto|producto/prestamo_feria/vehiculos_nuevos",          "title": "Vehículos nuevos" },
+          { "id": "INTENT:producto|producto/prestamo_feria/vivienda_economica",        "title": "Vivienda económica" },
+          { "id": "INTENT:producto|producto/prestamo_feria/hipotecario_general",       "title": "Hipotecario" },
+          { "id": "INTENT:producto|producto/prestamo_feria/paneles_solares",           "title": "Paneles solares" },
+          { "id": "INTENT:producto|producto/prestamo_feria/microempresas",             "title": "Microempresas" },
+          { "id": "INTENT:producto|producto/prestamo_feria/agropecuarios",             "title": "Agropecuarios" }
         ]
       }
     ]
   },
   "productos": {
     "header": "Productos y Servicios",
-    "body": "¿Sobre qué categoría quieres saber más?",
+    "body": "En Vega Real ofrecemos estos productos para tu bienestar financiero:",
     "button": "Ver productos",
     "sections": [
       {
         "title": "Productos",
         "rows": [
-          { "id": "INTENT:producto|producto/prestamo/hipotecario producto/prestamo/comercial producto/prestamo/consumo", "title": "Préstamos" },
-          { "id": "INTENT:producto|producto/cuenta/aportaciones producto/cuenta/cuenta_ahorro_retirable producto/cuenta/cuenta_ahorro_infantil producto/cuenta/orden_pago producto/cuenta/nomina_electronica producto/cuenta/tarjeta_debito_real producto/cuenta/coop_san_real", "title": "Cuentas" },
+          { "id": "MENU:prestamos",                                              "title": "Préstamos" },
+          { "id": "MENU:cuentas",                                                "title": "Cuentas" },
           { "id": "INTENT:producto|producto/certificado/certificado_financiero", "title": "Certificados" },
-          { "id": "INTENT:producto|producto/tarifa/servicios producto/tarifa/otros", "title": "Tarifas" },
-          { "id": "INTENT:producto|producto/membresia/distrital_comunitaria producto/membresia/distrital_empresarial producto/membresia/distrital_por_agencia producto/membresia/infantil", "title": "Membresía" },
-          { "id": "MENU:raiz",                                                                    "title": "← Menú principal" }
+          { "id": "MENU:tarifas",                                                "title": "Tarifas" },
+          { "id": "MENU:membresias",                                             "title": "Membresía" },
+          { "id": "MENU:raiz",                                                   "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "cuentas": {
+    "header": "Cuentas",
+    "body": "Tenemos estas cuentas pensadas para ti:",
+    "button": "Ver tipos",
+    "sections": [
+      {
+        "title": "Tipos de cuenta",
+        "rows": [
+          { "id": "INTENT:producto|producto/cuenta/aportaciones",            "title": "Aportaciones" },
+          { "id": "INTENT:producto|producto/cuenta/cuenta_ahorro_retirable", "title": "Ahorro retirable" },
+          { "id": "INTENT:producto|producto/cuenta/cuenta_ahorro_infantil",  "title": "Ahorro infantil" },
+          { "id": "INTENT:producto|producto/cuenta/orden_pago",              "title": "Orden de pago" },
+          { "id": "INTENT:producto|producto/cuenta/nomina_electronica",      "title": "Nómina electrónica" },
+          { "id": "INTENT:producto|producto/cuenta/tarjeta_debito_real",     "title": "Tarjeta de Débito" },
+          { "id": "INTENT:producto|producto/cuenta/coop_san_real",           "title": "Coop San Real" },
+          { "id": "MENU:productos",                                          "title": "← Productos" }
+        ]
+      }
+    ]
+  },
+  "prestamos": {
+    "header": "Préstamos",
+    "body": "Nuestros préstamos te apoyan en cada etapa de tu vida:",
+    "button": "Ver tipos",
+    "sections": [
+      {
+        "title": "Tipos de préstamo",
+        "rows": [
+          { "id": "INTENT:producto|producto/prestamo/hipotecario", "title": "Hipotecario" },
+          { "id": "INTENT:producto|producto/prestamo/comercial",   "title": "Comercial" },
+          { "id": "INTENT:producto|producto/prestamo/consumo",     "title": "Consumo" },
+          { "id": "MENU:productos",                                "title": "← Productos" }
+        ]
+      }
+    ]
+  },
+  "tarifas": {
+    "header": "Tarifas",
+    "body": "Estas son nuestras tarifas vigentes:",
+    "button": "Ver tarifas",
+    "sections": [
+      {
+        "title": "Tipos de tarifa",
+        "rows": [
+          { "id": "INTENT:producto|producto/tarifa/servicios", "title": "Servicios" },
+          { "id": "INTENT:producto|producto/tarifa/otros",     "title": "Otros" },
+          { "id": "MENU:productos",                            "title": "← Productos" }
+        ]
+      }
+    ]
+  },
+  "membresias": {
+    "header": "Membresía",
+    "body": "Tenemos estos tipos de membresía para que formes parte de nuestra cooperativa:",
+    "button": "Ver tipos",
+    "sections": [
+      {
+        "title": "Tipos de membresía",
+        "rows": [
+          { "id": "INTENT:producto|producto/membresia/distrital_comunitaria", "title": "Distrital comunitaria" },
+          { "id": "INTENT:producto|producto/membresia/distrital_empresarial", "title": "Distrital empresarial" },
+          { "id": "INTENT:producto|producto/membresia/distrital_por_agencia", "title": "Distrital por agencia" },
+          { "id": "INTENT:producto|producto/membresia/infantil",              "title": "Infantil" },
+          { "id": "MENU:productos",                                           "title": "← Productos" }
         ]
       }
     ]
   },
   "servicios": {
     "header": "Servicios Sociales",
-    "body": "Beneficios y servicios para ti y tu familia:",
+    "body": "Ofrecemos estos beneficios y servicios sociales para ti y tu familia:",
     "button": "Ver opciones",
     "sections": [
       {
@@ -105,13 +173,98 @@
       {
         "title": "Cooperativa Vega Real",
         "rows": [
-          { "id": "INTENT:empresa|empresa/historia/fundacion empresa/filosofia/mision empresa/filosofia/vision empresa/filosofia/valores", "title": "Historia y filosofía" },
-          { "id": "INTENT:empresa|empresa/asociado/afiliarse empresa/asociado/porque_afiliarse empresa/asociado/requisitos", "title": "Cómo afiliarme" },
+          { "id": "MENU:historia",                                "title": "Historia y filosofía" },
+          { "id": "MENU:afiliarme",                               "title": "Cómo afiliarme" },
           { "id": "INTENT:empresa|empresa/asociado/beneficios_socio", "title": "Beneficios de ser socio" },
-          { "id": "INTENT:empresa|empresa/contacto/correo empresa/contacto/sitio_web empresa/contacto/telefono empresa/contacto/url_app empresa/contacto/url_cvrnet", "title": "Contacto y canales" },
-          { "id": "INTENT:empresa|empresa/estructura/asamblea empresa/estructura/consejo_administracion empresa/estructura/consejo_vigilancia empresa/estructura/cooperativa empresa/estructura/distrito", "title": "Estructura" },
-          { "id": "INTENT:empresa|empresa/politica/calidad empresa/politica/genero empresa/politica/responsabilidad_social", "title": "Políticas" },
-          { "id": "MENU:raiz",                                                                  "title": "← Menú principal" }
+          { "id": "MENU:contacto",                                "title": "Contacto y canales" },
+          { "id": "MENU:estructura",                              "title": "Estructura" },
+          { "id": "MENU:politicas",                               "title": "Políticas" },
+          { "id": "MENU:raiz",                                    "title": "← Menú principal" }
+        ]
+      }
+    ]
+  },
+  "historia": {
+    "header": "Historia y filosofía",
+    "body": "Nuestra historia, misión, visión y valores:",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Identidad cooperativa",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/historia/fundacion", "title": "Fundación" },
+          { "id": "INTENT:empresa|empresa/filosofia/mision",   "title": "Misión" },
+          { "id": "INTENT:empresa|empresa/filosofia/vision",   "title": "Visión" },
+          { "id": "INTENT:empresa|empresa/filosofia/valores",  "title": "Valores" },
+          { "id": "MENU:cooperativa",                          "title": "← Cooperativa" }
+        ]
+      }
+    ]
+  },
+  "afiliarme": {
+    "header": "Cómo afiliarme",
+    "body": "Únete a nuestra familia cooperativa:",
+    "button": "Ver opciones",
+    "sections": [
+      {
+        "title": "Afiliación",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/asociado/afiliarse",        "title": "Cómo afiliarse" },
+          { "id": "INTENT:empresa|empresa/asociado/porque_afiliarse", "title": "¿Por qué afiliarse?" },
+          { "id": "INTENT:empresa|empresa/asociado/requisitos",       "title": "Requisitos" },
+          { "id": "MENU:cooperativa",                                 "title": "← Cooperativa" }
+        ]
+      }
+    ]
+  },
+  "contacto": {
+    "header": "Contacto y canales",
+    "body": "Estamos para servirte. Estos son nuestros canales oficiales:",
+    "button": "Ver canales",
+    "sections": [
+      {
+        "title": "Canales oficiales",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/contacto/telefono",   "title": "Teléfono" },
+          { "id": "INTENT:empresa|empresa/contacto/correo",     "title": "Correo" },
+          { "id": "INTENT:empresa|empresa/contacto/sitio_web",  "title": "Sitio web" },
+          { "id": "INTENT:empresa|empresa/contacto/url_app",    "title": "App Vega Real" },
+          { "id": "INTENT:empresa|empresa/contacto/url_cvrnet", "title": "Internet Banking" },
+          { "id": "MENU:cooperativa",                           "title": "← Cooperativa" }
+        ]
+      }
+    ]
+  },
+  "estructura": {
+    "header": "Estructura",
+    "body": "Así está organizada tu cooperativa:",
+    "button": "Ver estructura",
+    "sections": [
+      {
+        "title": "Órganos de gobierno",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/estructura/asamblea",               "title": "Asamblea General" },
+          { "id": "INTENT:empresa|empresa/estructura/consejo_administracion", "title": "Consejo Admon." },
+          { "id": "INTENT:empresa|empresa/estructura/consejo_vigilancia",     "title": "Consejo Vigilancia" },
+          { "id": "INTENT:empresa|empresa/estructura/cooperativa",            "title": "Cooperativa" },
+          { "id": "INTENT:empresa|empresa/estructura/distrito",               "title": "Distrito" },
+          { "id": "MENU:cooperativa",                                         "title": "← Cooperativa" }
+        ]
+      }
+    ]
+  },
+  "politicas": {
+    "header": "Políticas",
+    "body": "Nuestros compromisos y políticas institucionales:",
+    "button": "Ver políticas",
+    "sections": [
+      {
+        "title": "Compromisos",
+        "rows": [
+          { "id": "INTENT:empresa|empresa/politica/calidad",                "title": "Calidad" },
+          { "id": "INTENT:empresa|empresa/politica/genero",                 "title": "Género" },
+          { "id": "INTENT:empresa|empresa/politica/responsabilidad_social", "title": "Resp. social" },
+          { "id": "MENU:cooperativa",                                       "title": "← Cooperativa" }
         ]
       }
     ]
