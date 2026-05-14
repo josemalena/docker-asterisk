@@ -49,8 +49,24 @@
     #message { flex-grow: 1; padding: 10px; border: 1px solid #ccc; border-radius: 20px; font-size: 16px; width: 100%; box-sizing: border-box;}
     #send { margin-left: 10px; padding: 10px 20px; background: #25d366; color: white; border: none; border-radius: 20px; font-size: 16px; cursor: pointer; }
     .typing { font-style: italic; color: #666; }
-    @media (min-width: 300px) {  
-        #message { width: 60%; }  
+    .menu-card { background: #ffffff; border-radius: 12px; padding: 12px 14px; max-width: 80%;
+                 align-self: flex-start; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.08);
+                 border-bottom-left-radius: 0; }
+    .menu-card .menu-header { font-size: 13px; font-weight: 700; color: #075e54; margin-bottom: 4px; }
+    .menu-card .menu-body   { font-size: 13.5px; color: #303030; margin-bottom: 8px; white-space: pre-wrap; }
+    .menu-card .menu-footer { font-size: 11.5px; color: #888; margin-top: 6px; font-style: italic; }
+    .menu-card .menu-section-title { font-size: 11.5px; color: #888; text-transform: uppercase;
+                                     letter-spacing: .04em; margin: 6px 0 4px; }
+    .menu-card .menu-row { display: block; width: 100%; text-align: left; background: #f7f8fa;
+                           border: 1px solid #e5e7eb; border-radius: 8px; padding: 9px 12px;
+                           margin-bottom: 6px; font-size: 14px; color: #1f2937; cursor: pointer;
+                           font-family: inherit; transition: background .12s, border-color .12s; }
+    .menu-card .menu-row:hover, .menu-card .menu-row:focus {
+        background: #e7f5ee; border-color: #25d366; outline: none;
+    }
+    .menu-card .menu-row:disabled { opacity: .6; cursor: not-allowed; }
+    @media (min-width: 300px) {
+        #message { width: 60%; }
         #send { width: auto; }
     }
   </style>

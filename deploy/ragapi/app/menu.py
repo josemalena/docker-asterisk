@@ -195,7 +195,7 @@ def formatear_contexto_personal(contexto) -> str:
     (Préstamos, Certificados, Cuentas, Artículos de Feria) con saludo personalizado."""
     import json as _json
 
-    sin_datos = "No encontramos productos activos asociados a tu cuenta. Si crees que es un error, comunícate con la cooperativa."
+    sin_datos = "No encontramos productos activos asociados a tu cuenta. Si crees que es un error, comunícate con un representante de Vega Real al 829-573-4258."
 
     if not contexto:
         return sin_datos
@@ -209,6 +209,26 @@ def formatear_contexto_personal(contexto) -> str:
         productos = [productos]
     if not isinstance(productos, list) or not productos:
         return sin_datos
+
+    # Si llega un artículo de feria (prestamo_feria) con cantidad 0,
+    # marcar una bandera para manejarlo al final (solo mostrar mensaje si
+    # no hay otros productos válidos).
+    feria_zero_found = False
+    for p in productos:
+        try:
+            if (isinstance(p, dict) and p.get('tipo') == 'articulo'
+                    and (p.get('subtipo') or '').lower() == 'prestamo_feria'):
+                # cantidad_articulo puede venir como string o número
+                cantidad = p.get('cantidad_articulo')
+                try:
+                    cantidad_val = int(cantidad) if cantidad is not None and str(cantidad).strip() != '' else 0
+                except Exception:
+                    cantidad_val = 0
+                if cantidad_val == 0:
+                    feria_zero_found = True
+        except Exception:
+            # Si hay cualquier problema leyendo el item, ignorarlo y continuar
+            pass
 
     grupos = {"prestamo": [], "certificado": [], "cuenta": [], "feria": []}
     nombre_asociado = None
@@ -231,11 +251,13 @@ def formatear_contexto_personal(contexto) -> str:
             grupos["cuenta"].append(p)
 
     if not any(grupos.values()):
+        if feria_zero_found:
+            return "No encontramos tu préstamo de feria. Si crees que es un error, comunícate con un representante de Vega Real al 829-573-4258."
         return sin_datos
 
     primer_nombre = (nombre_asociado or "").strip().split(" ")[0]
     if primer_nombre:
-        saludo = f"¡Hola {primer_nombre}! Este es el resumen de tus productos en Vega Real:"
+        saludo = f"{primer_nombre}, Este es el resumen de tus productos en Vega Real:"
     else:
         saludo = "Este es el resumen de tus productos en Vega Real:"
 
@@ -247,7 +269,7 @@ def formatear_contexto_personal(contexto) -> str:
         return f"• {nombre}"
 
     def _linea_feria(p):
-        nombre = p.get("descripcion_articulo") or "Artículo de feria"
+        nombre = p.get("descripcion_articulo") or "Feria"
         estado = (p.get("estado_articulo") or "").strip()
         if estado:
             return f"• {nombre} — Estado: {estado}"
@@ -258,7 +280,7 @@ def formatear_contexto_personal(contexto) -> str:
         ("*Préstamos*",          grupos["prestamo"],    _linea_producto),
         ("*Certificados*",       grupos["certificado"], _linea_producto),
         ("*Cuentas*",            grupos["cuenta"],      _linea_producto),
-        ("*Artículos de Feria*", grupos["feria"],       _linea_feria),
+        ("*Feria*",              grupos["feria"],       _linea_feria),
     ]
     for header, items, formatter in secciones:
         if not items:

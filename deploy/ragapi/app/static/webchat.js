@@ -13,6 +13,10 @@ function getCurrentTime() {
   return now.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' });
 }
 
+function esc(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+}
+
 function addMessage(text, sender, id = null, replyToId = null) {
   const div = document.createElement('div');
   div.className = 'message ' + sender;
@@ -30,6 +34,7 @@ function addMessage(text, sender, id = null, replyToId = null) {
     } else {
       replyHtml = `<div style="border-left: 3px solid #ccc; padding-left: 5px; margin-bottom: 5px; font-size: 12px; color: #555;">Respuesta a mensaje desconocido (ID: ${replyToId})</div>`;
     }
+    replyHtml = '';// eliminamos el "Respuesta a:""
   }
 
   div.innerHTML = `
@@ -42,6 +47,51 @@ function addMessage(text, sender, id = null, replyToId = null) {
   setTimeout(() => {
     chat.scrollTop = chat.scrollHeight;
   }, 50);
+}
+
+function addMenu(menu) {
+  // Deshabilita botones de menús anteriores para que el usuario no vuelva atrás haciendo click viejo.
+  document.querySelectorAll('.menu-card .menu-row').forEach(b => b.disabled = true);
+
+  const card = document.createElement('div');
+  card.className = 'menu-card';
+
+  let html = '';
+  if (menu.header) html += `<div class="menu-header">${esc(menu.header)}</div>`;
+  if (menu.body)   html += `<div class="menu-body">${esc(menu.body).replace(/\n/g, '<br>')}</div>`;
+  (menu.sections || []).forEach(sec => {
+    if (sec.title) html += `<div class="menu-section-title">${esc(sec.title)}</div>`;
+    (sec.rows || []).forEach(row => {
+      const id = esc(row.id || '');
+      const title = esc(row.title || '');
+      html += `<button type="button" class="menu-row" data-id="${id}" data-title="${title}">${title}</button>`;
+    });
+  });
+  if (menu.footer) html += `<div class="menu-footer">${esc(menu.footer)}</div>`;
+  card.innerHTML = html;
+
+  card.querySelectorAll('.menu-row').forEach(btn => {
+    btn.addEventListener('click', () => seleccionarOpcionMenu(btn.dataset.id, btn.dataset.title));
+  });
+
+  chat.appendChild(card);
+  setTimeout(() => { chat.scrollTop = chat.scrollHeight; }, 50);
+}
+
+async function seleccionarOpcionMenu(payloadId, titulo) {
+  if (!payloadId) return;
+  addMessage(titulo, 'user');
+  showTypingIndicator();
+  try {
+    await fetch(server + '/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: titulo, payload: payloadId })
+    });
+  } catch (err) {
+    removeTypingIndicator();
+    addMessage("Error de conexión al servidor.", 'bot');
+  }
 }
 
 function mostrarPensandoBienvenida() {
@@ -155,7 +205,7 @@ messageInput.addEventListener('keypress', (e) => {
   }
 });
 
-// Polling cada 2 segundos para recibir nuevas respuestas
+// Polling cada 3 segundos para recibir nuevas respuestas
 setInterval(async () => {
   try {
     const res = await fetch(server + '/webchat/mensajes');
@@ -163,8 +213,13 @@ setInterval(async () => {
     if (data.mensajes && data.mensajes.length > 0) {
       removeTypingIndicator();
       data.mensajes.forEach(jsonStr => {
-        const msg = JSON.parse(jsonStr);
-        addMessage(msg.message, 'bot', null, msg.message_id)
+        let msg;
+        try { msg = JSON.parse(jsonStr); } catch { return; }
+        if (msg && msg.type === 'menu' && msg.menu) {
+          addMenu(msg.menu);
+        } else {
+          addMessage(msg.message, 'bot', null, msg.message_id);
+        }
       });
     }
   } catch (err) {

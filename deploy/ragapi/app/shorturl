@@ -1,0 +1,7 @@
+curl -k -s -c cookies.txt -X POST https://eventos.cvr.com.do/login \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=admin&password=cvradmin1!' && \
+curl -k -s -X POST https://eventos.cvr.com.do/api/urlcorta \
+  -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://forms.office.com/Pages/ResponsePage.aspx?id=UD-zn66a5UW5QSNTeLErJl6KyRlfJe1MsovYir-jbwFURU1XWEI1N09DUUpIODZXQ1MxNjE2RzlGSC4u&origin=QRCode"}'

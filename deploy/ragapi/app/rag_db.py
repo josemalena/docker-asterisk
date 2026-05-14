@@ -265,9 +265,16 @@ def crear_bd():
         canal TEXT NOT NULL,
         pregunta TEXT NOT NULL,
         intencion TEXT,
-        respuesta TEXT NOT NULL
+        respuesta TEXT NOT NULL,
+        intent_source TEXT
     )
     ''')
+    # Migración: agrega la columna si la tabla ya existía sin ella.
+    cursor.execute("PRAGMA table_info(interacciones_chatbot)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'intent_source' not in cols:
+        cursor.execute("ALTER TABLE interacciones_chatbot ADD COLUMN intent_source TEXT")
+        logg("crear_db: columna 'intent_source' añadida a interacciones_chatbot")
     conn.commit()
     conn.close()
     logg(f"crear_db: Base de datos ChatBot lista '{CHATBOT_DB}'")
@@ -469,24 +476,143 @@ CLIENTES = """  c.cod_persona AS id_cliente,
 #### AQUI VA EL QUERY PARA SACAR LOS PRESTAMOS Y PRODUCTOS DE FERIA
 
 #### 
-def obtener_interacciones():
+def obtener_conversaciones(canal=None, fecha_desde=None, fecha_hasta=None,
+                           q=None, cod_persona=None,
+                           pagina=1, por_pagina=50):
+    """Devuelve conversaciones agrupadas por session_id, con filtros + paginación.
+    Retorna (filas, total). Cada fila:
+        (session_id, canal, cod_persona, fecha_inicio, fecha_fin, mensajes)."""
     con = sqlite3.connect(CHATBOT_DB)
     cur = con.cursor()
-    cur.execute("SELECT * FROM interacciones_chatbot")
+
+    where = []
+    params = []
+    if canal:
+        where.append("canal = ?")
+        params.append(canal)
+    if fecha_desde:
+        where.append("fecha_hora >= ?")
+        params.append(fecha_desde)
+    if fecha_hasta:
+        where.append("fecha_hora < datetime(?, '+1 day')")
+        params.append(fecha_hasta)
+    if cod_persona:
+        where.append("cod_persona = ?")
+        params.append(cod_persona)
+    if q:
+        where.append("(pregunta LIKE ? OR respuesta LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like])
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    cur.execute(
+        f"SELECT COUNT(DISTINCT session_id) FROM interacciones_chatbot{where_sql}",
+        params,
+    )
+    total = cur.fetchone()[0]
+
+    pagina = max(1, int(pagina or 1))
+    por_pagina = max(1, min(500, int(por_pagina or 50)))
+    offset = (pagina - 1) * por_pagina
+
+    cur.execute(
+        f"""SELECT session_id,
+                   MAX(canal) AS canal,
+                   MAX(CASE WHEN cod_persona NOT IN ('', '0') AND cod_persona IS NOT NULL
+                            THEN cod_persona END) AS cod_persona,
+                   MIN(fecha_hora) AS fecha_inicio,
+                   MAX(fecha_hora) AS fecha_fin,
+                   COUNT(*)        AS mensajes
+            FROM interacciones_chatbot{where_sql}
+            GROUP BY session_id
+            ORDER BY MAX(fecha_hora) DESC
+            LIMIT ? OFFSET ?""",
+        params + [por_pagina, offset],
+    )
     filas = cur.fetchall()
-    columnas = [description[0] for description in cur.description]
     con.close()
-    return columnas, filas
+    return filas, total
+
+
+def obtener_mensajes_sesion(session_id):
+    """Devuelve los mensajes de una sesión ordenados cronológicamente.
+    Retorna lista de dicts con: id, fecha_hora, canal, cod_persona, pregunta, intencion,
+    respuesta, intent_source."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    cur.execute(
+        """SELECT id, fecha_hora, canal, cod_persona, pregunta, intencion, respuesta, intent_source
+           FROM interacciones_chatbot
+           WHERE session_id = ?
+           ORDER BY fecha_hora ASC, id ASC""",
+        (session_id,),
+    )
+    columnas = [d[0] for d in cur.description]
+    out = [dict(zip(columnas, row)) for row in cur.fetchall()]
+    con.close()
+    return out
+
+
+def obtener_interacciones(canal=None, fecha_desde=None, fecha_hasta=None,
+                          q=None, cod_persona=None, session_id=None,
+                          pagina=1, por_pagina=50):
+    """Devuelve interacciones con filtros + paginación.
+    Retorna (columnas, filas, total)."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+
+    where = []
+    params = []
+    if canal:
+        where.append("canal = ?")
+        params.append(canal)
+    if fecha_desde:
+        where.append("fecha_hora >= ?")
+        params.append(fecha_desde)
+    if fecha_hasta:
+        # incluir todo el día final
+        where.append("fecha_hora < datetime(?, '+1 day')")
+        params.append(fecha_hasta)
+    if cod_persona:
+        where.append("cod_persona = ?")
+        params.append(cod_persona)
+    if session_id:
+        where.append("session_id = ?")
+        params.append(session_id)
+    if q:
+        where.append("(pregunta LIKE ? OR respuesta LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like])
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    cur.execute(f"SELECT COUNT(*) FROM interacciones_chatbot{where_sql}", params)
+    total = cur.fetchone()[0]
+
+    pagina = max(1, int(pagina or 1))
+    por_pagina = max(1, min(500, int(por_pagina or 50)))
+    offset = (pagina - 1) * por_pagina
+
+    cur.execute(
+        f"SELECT * FROM interacciones_chatbot{where_sql} "
+        f"ORDER BY fecha_hora DESC, id DESC LIMIT ? OFFSET ?",
+        params + [por_pagina, offset]
+    )
+    filas = cur.fetchall()
+    columnas = [d[0] for d in cur.description]
+    con.close()
+    return columnas, filas, total
 
 def guardar_interaccion(session_id, cod_cliente, canal, pregunta, intencion, respuesta):
+    intent_source = intencion.get('intent_source') if isinstance(intencion, dict) else None
     intencion_str = json.dumps(intencion, ensure_ascii=False) if isinstance(intencion, dict) else intencion
     conn = sqlite3.connect(CHATBOT_DB)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO interacciones_chatbot
-        (session_id, cod_persona, canal, pregunta, intencion, respuesta)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (session_id, cod_cliente, canal, pregunta, intencion_str, respuesta))
+        (session_id, cod_persona, canal, pregunta, intencion, respuesta, intent_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (session_id, cod_cliente, canal, pregunta, intencion_str, respuesta, intent_source))
     conn.commit()
     conn.close()
     chat = ConversationManager(session_id)
@@ -562,7 +688,7 @@ def buscar_cliente_por_cedula(cedula):
     try:
         cursor = connection.cursor()
         query = """
-        SELECT COD_PERSONA, SEXO, REPLACE(REPLACE(REPLACE(NVL(CELULAR, TELEFONO), '-', ''), '.', ''), '+', '') AS TELEFONO,
+        SELECT COD_PERSONA, SEXO, REPLACE(REPLACE(REPLACE(CELULAR ||',' || TELEFONO, '-', ''), '.', ''), '+', '') AS TELEFONO,
          INITCAP(PRIMER_NOMBRE || ' ' || SEGUNDO_NOMBRE) nombres, 
          INITCAP(PRIMER_APELLIDO || ' ' || SEGUNDO_APELLIDO) apellidos         
         FROM captura_cliente
@@ -587,7 +713,7 @@ def buscar_cliente(cod_persona):
     try:
         cursor = connection.cursor()
         query = """
-        SELECT COD_PERSONA, SEXO, NVL(CELULAR, TELEFONO) AS TELEFONO,
+        SELECT COD_PERSONA, SEXO, CELULAR ||',' || TELEFONO,
          INITCAP(PRIMER_NOMBRE || ' ' || SEGUNDO_NOMBRE) nombres, 
          INITCAP(PRIMER_APELLIDO || ' ' || SEGUNDO_APELLIDO) apellidos         
         FROM captura_cliente
@@ -950,6 +1076,30 @@ def resumen_feria(xml_str, entidad):
                     "nombre_asociado" : datos_cliente["nombres"]
                 }
                 resumen.append(result)
+    if not resumen:
+        # Intentar obtener el cliente desde el XML si está disponible
+        cliente_id = tree.findtext('.//COD_CLIENTE')
+        if cliente_id:
+            try:
+                datos_cliente = buscar_cliente(cliente_id)
+            except Exception:
+                datos_cliente = {"nombres": ""}
+        else:
+            datos_cliente = {"nombres": ""}
+
+        result = {
+                    "tipo": "articulo", "subtipo": "prestamo_feria", 
+                    "numero_producto": "0",
+                    "codigo_articulo": "Ninguno",
+                    "suplidor": "",
+                    "fecha_entrega": "",
+                    "fecha_depachado" : "",
+                    "descripcion_articulo": "Ninguno",
+                    "estado_articulo": "Ninguno",
+                    "cantidad_articulo": 0,                
+                    "nombre_asociado" : datos_cliente.get("nombres", "")
+                }
+        resumen.append(result)
     return resumen
 
 def resumen_personal(xml_str):

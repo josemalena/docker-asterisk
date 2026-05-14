@@ -34,7 +34,8 @@
     "piscina",
     "tarjeta",
     "como", "feria",
-    "puedes", "sabes", "funciones", "ayuda", "informa", "reclamar"
+    "puedes", "sabes", "funciones", "ayuda", "informa", "reclamar",
+    "precio", "precios", "cuesta", "cuestan", "costo", "vale", "valen"
   ],
   "empleo": [
     "vacantes",
@@ -97,9 +98,15 @@
     "salud",
     "social"
   ],
-  "sucursal":["sucursal", "oficina", "direccion", "horario", "donde estan", "ubicacion", "localidad", "llega", "llego", "casa club", "cotui", "nagua", "moca", "la vega", "macoris", "bonao", "las canas"],
+  "sucursal":["sucursal", "oficina", "provincia", "direccion", "horario", "donde estan", "ubicacion", "localidad", "llega", "llego", "casa club", "cotui", "nagua", "moca", "la vega", "macoris", "bonao", "las canas", "sanchez ramirez", "ramirez", "fantino", "angelina", "jarabacoa", "constanza", "espaillat", "hermanas mirabal", "salcedo", "new york"],
   "actividad": ["actividad", "taller", "sesion", "charla", "jornada", "celebracion", "hora", "dia", "mes"],
-  "saldo": ["consultar","estado", "feria", "saldo", "tarjeta debito real", "cuenta", "prestamo", "entrega", "articulo"],
+  "saldo": ["consultar","estado", "feria", "saldo", "tarjeta debito real", "cuenta", "prestamo", "entrega", "articulo",
+    "pedi", "pedido", "pedida", "pedidos", "pedidas",
+    "ordene", "compre", "compraste",
+    "entregar", "entregaran", "entregaron", "entregan", "entregado", "entregada", "entregue", "entreguen", "entregamos",
+    "tardaran", "tardar", "tardara",
+    "articulos", "comprado", "comprada"
+  ],
   "saludo": [
     "hola",
     "buenos dias",

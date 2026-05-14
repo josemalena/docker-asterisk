@@ -12,15 +12,15 @@
 {"tipo": "empresa", "subtipo": "politica", "valor": "calidad", "ruta": "empresa/politica/calidad"}
 {"tipo": "empresa", "subtipo": "politica", "valor": "genero", "ruta": "empresa/politica/genero"}
 {"tipo": "empresa", "subtipo": "politica", "valor": "responsabilidad_social", "ruta": "empresa/politica/responsabilidad_social"}
-{"tipo": "empresa", "subtipo": "asociado", "valor":"afiliarse", "descripcion": "tarifa membresia", "ruta": "empresa/asociado/afiliarse"}
+{"tipo": "empresa", "subtipo": "asociado", "valor": "afiliarse", "descripcion": "tarifa membresia", "ruta": "empresa/asociado/afiliarse"}
 {"tipo": "empresa", "subtipo": "asociado", "valor": "porque_afiliarse", "ruta": "empresa/asociado/porque_afiliarse"}
 {"tipo": "empresa", "subtipo": "asociado", "valor": "beneficios_socio", "ruta": "empresa/asociado/beneficios_socio"}
-{"tipo": "empresa", "subtipo": "asociado", "valor":"requisitos", "ruta": "empresa/asociado/requisitos"}
-{"tipo": "empresa", "subtipo": "estructura", "valor": "distrito",                "ruta": "empresa/estructura/distrito"}
-{"tipo": "empresa", "subtipo": "estructura", "valor": "cooperativa",             "ruta": "empresa/estructura/cooperativa"}
-{"tipo": "empresa", "subtipo": "estructura", "valor": "asamblea",                "ruta": "empresa/estructura/asamblea"}
-{"tipo": "empresa", "subtipo": "estructura", "valor": "consejo_administracion",  "ruta": "empresa/estructura/consejo_administracion"}
-{"tipo": "empresa", "subtipo": "estructura", "valor": "consejo_vigilancia",      "ruta": "empresa/estructura/consejo_vigilancia"}
+{"tipo": "empresa", "subtipo": "asociado", "valor": "requisitos", "ruta": "empresa/asociado/requisitos"}
+{"tipo": "empresa", "subtipo": "estructura", "valor": "distrito", "ruta": "empresa/estructura/distrito"}
+{"tipo": "empresa", "subtipo": "estructura", "valor": "cooperativa", "ruta": "empresa/estructura/cooperativa"}
+{"tipo": "empresa", "subtipo": "estructura", "valor": "asamblea", "ruta": "empresa/estructura/asamblea"}
+{"tipo": "empresa", "subtipo": "estructura", "valor": "consejo_administracion", "ruta": "empresa/estructura/consejo_administracion"}
+{"tipo": "empresa", "subtipo": "estructura", "valor": "consejo_vigilancia", "ruta": "empresa/estructura/consejo_vigilancia"}
 # Asociado
 {"tipo": "asociado", "subtipo": "requisitos", "valor": null, "ruta": "asociado/requisitos"}
 {"tipo": "asociado", "subtipo": "beneficios", "valor": null, "ruta": "asociado/beneficios"}
@@ -81,48 +81,49 @@
 {"tipo": "ayuda", "subtipo": "canal_digital", "valor": "acceso_internet_banking", "ruta": "ayuda/canal_digital/acceso_internet_banking"}
 {"tipo": "ayuda", "subtipo": "asociado", "valor": "afiliacion", "ruta": "ayuda/asociado/afiliacion"}
 {"tipo": "ayuda", "subtipo": "casa_club", "valor": "piscina", "ruta": "ayuda/casa_club/piscina"}
-{"tipo": "ayuda", "subtipo": "capacidades", "valor":"ayudar"}
-{"tipo": "ayuda", "subtipo": "capacidades", "valor":"hacer"}
-{"tipo": "ayuda", "subtipo": "capacidades", "valor":"funcion"}
-{"tipo": "ayuda", "subtipo": "capacidades", "valor":"informa"}
-{"tipo": "ayuda", "subtipo": "feria", "valor":"reclamar"}
-{"tipo": "ayuda", "subtipo": "feria", "valor":"informacion"}
+{"tipo": "ayuda", "subtipo": "capacidades", "valor": "ayudar"}
+{"tipo": "ayuda", "subtipo": "capacidades", "valor": "hacer"}
+{"tipo": "ayuda", "subtipo": "capacidades", "valor": "funcion"}
+{"tipo": "ayuda", "subtipo": "capacidades", "valor": "informa"}
+{"tipo": "ayuda", "subtipo": "feria", "valor": "reclamar"}
+{"tipo": "ayuda", "subtipo": "feria", "valor": "informacion"}
+{"tipo": "ayuda", "subtipo": "feria", "valor": "precios", "ruta": "ayuda/feria/precios", "descripcion": "precio precios cuesta cuestan costo cuanto vale cuanto valen cuanto cobran"}
 # Saludo
-{"tipo": "ayuda", "subtipo": "saludo", "valor":"saludo"}
-{"tipo": "ayuda", "subtipo": "cierre", "valor":"cierre"}
+{"tipo": "ayuda", "subtipo": "saludo", "valor": "saludo"}
+{"tipo": "ayuda", "subtipo": "cierre", "valor": "cierre"}
 # Vacantes
 {"tipo": "empleo", "subtipo": "vacantes", "valor": "vacantes_disponibles", "ruta": "empleo/vacantes/vacantes_disponibles"}
 # Sucursales
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "feria", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "casa club", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "central", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "constanza", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Fantino", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Salcedo", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Villa Rosa", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Libertad", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Jarabacoa", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Los Pomos", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Bonao", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Zona Franca", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "moca", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Canas", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Barranca", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Jima Abajo", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Cutupu", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Loteria", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Cotui", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Angelina", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Tenares", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Villa Tapia", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Salome", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Castillo", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Pimentel", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "El Factor", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Cenovi", "filtros" :["nombre", "municipio", "provincia", "pais"]}
-{"tipo": "sucursal", "subtipo":"direccion", "valor" : "Sanchez", "filtros" :["nombre", "municipio", "provincia", "pais"]}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "feria", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "casa club", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "central", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "constanza", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Fantino", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Sanchez Ramirez"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Salcedo", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Hermanas Mirabal"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Villa Rosa", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Libertad", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Duarte"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Jarabacoa", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Los Pomos", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Bonao", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Monsenor Nouel"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Zona Franca", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "moca", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Espaillat"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Canas", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Barranca", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Jima Abajo", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Cutupu", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Loteria", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Cotui", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Sanchez Ramirez"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Angelina", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Sanchez Ramirez"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Tenares", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Hermanas Mirabal"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Villa Tapia", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Hermanas Mirabal"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Salome", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Duarte"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Castillo", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Duarte"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Pimentel", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Duarte"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "El Factor", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "Duarte"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Cenovi", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "La Vega"}
+{"tipo": "sucursal", "subtipo": "direccion", "valor": "Sanchez", "filtros": ["nombre", "municipio", "provincia", "pais"], "provincia": "New York"}
 # Actividad
-{"tipo": "actividad", "subtipo": "evento", "valor": null, "ruta": "actividad/evento", "filtros" :["fecha"]}
+{"tipo": "actividad", "subtipo": "evento", "valor": null, "ruta": "actividad/evento", "filtros": ["fecha"]}
 # Consultas personales
 {"tipo": "saldo", "subtipo": "prestamo_asociado", "valor": "hipotecario"}
 {"tipo": "saldo", "subtipo": "prestamo_asociado", "valor": "comercial"}
@@ -137,8 +138,8 @@
 {"tipo": "saldo", "subtipo": "cuenta_asociado", "valor": "orden de pago"}
 {"tipo": "saldo", "subtipo": "cuenta_asociado", "valor": "cuentas"}
 {"tipo": "saldo", "subtipo": "certificado_asociado", "valor": "certificado"}
-{"tipo": "saldo", "subtipo": "certificado_asociado", "valor":"plazo fijo"}
-{"tipo": "saldo", "subtipo": "certificado_asociado", "valor":"deposito a plazo"}
-{"tipo": "saldo", "subtipo": "certificado_asociado", "valor":"certificados"}
-{"tipo": "saldo", "subtipo": "prestamo_feria", "valor":"articulos"}
-{"tipo": "saldo", "subtipo": "articulo_feria", "valor":"articulos"}
+{"tipo": "saldo", "subtipo": "certificado_asociado", "valor": "plazo fijo"}
+{"tipo": "saldo", "subtipo": "certificado_asociado", "valor": "deposito a plazo"}
+{"tipo": "saldo", "subtipo": "certificado_asociado", "valor": "certificados"}
+{"tipo": "saldo", "subtipo": "prestamo_feria", "valor": "articulos"}
+{"tipo": "saldo", "subtipo": "articulo_feria", "valor": "articulos"}

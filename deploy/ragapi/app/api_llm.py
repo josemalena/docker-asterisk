@@ -7,17 +7,18 @@ import re
 import os
 import logging
 import urllib3
+import hashlib
 #from openai import OpenAI
 from typing import Dict, List, Optional
 from flask import Flask, request, jsonify, send_from_directory, session, request, redirect, url_for, render_template_string, flash, abort
 from flask_session import Session
 from pywebpush import webpush, WebPushException
 from threading import Thread
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from random import randint
 
 # Base de datos
-from rag_db import ConversationManager, obtener_interacciones, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula
+from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_sesion, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula
 
 # Menú interactivo WhatsApp
 import menu
@@ -40,6 +41,10 @@ otps = {}
 ultpreg = {}
 
 OLLAMA_URL = os.getenv("OLLAMA_URL")
+# Si USE_LLM=false, el bot responde sólo desde menú/RAG; las llamadas al LLM
+# (clasificador fallback y generador conversacional) responden con un mensaje
+# que redirige al usuario al menú. Útil mientras se mejora el entrenamiento.
+USE_LLM = os.getenv("USE_LLM", "false").strip().lower() in ("true", "1", "yes", "on", "si")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -61,6 +66,14 @@ VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY")
 VAPID_CLAIMS = {"sub": "mailto:" + os.getenv("VAPID_CLAIMS")}
 
 BASE_PATH = os.getenv("BASE_PATH")
+
+# Configuración de encuestas (endpoint externo)
+ENCUESTA_URL = os.getenv("ENCUESTA_URL", "http://172.17.0.99/api/external/link")
+ENCUESTA_API_KEY = os.getenv("ENCUESTA_API_KEY")
+try:
+    ENCUESTA_ID = int(os.getenv("ENCUESTA_ID", 0))
+except Exception:
+    ENCUESTA_ID = 0
 
 
 MISTRAL_KEY = "kAWpgcRmXj0jNyVOSX9JPsPsgQmvqq48"
@@ -189,8 +202,8 @@ def vapid_public_key():
 def zenvia_webhook():
     client_info = getClientInfo(request)
     logg(f"Webook - Request: {client_info}")
-    if request.method != 'POST':
-        return redirect(url_for('home'))
+    #if request.method != 'POST':
+    #    return redirect(url_for('home'))
     data = request.json
     logg(f"Webook - Mensaje: {data}")
     # 1. Filtrado robusto de mensajes
@@ -204,13 +217,39 @@ def zenvia_webhook():
     
     # 3. Extraer datos seguros
     try:
-        mensaje = data["message"]["contents"][0].get("text", "")
-        mensaje = mensaje.strip()
-        payload = data["message"]["contents"][0].get("payload", "")
+        content = data["message"]["contents"][0]
+        # Detectar archivos/attachments en WA: type distinto de 'text' o claves fileUrl/fileName
+        c_type = content.get("type", "text")
+        mensaje = content.get("text", "")
+        mensaje = mensaje.strip() if isinstance(mensaje, str) else ""
+        payload = content.get("payload", "")
         numero = data["message"]["from"]
     except (KeyError, IndexError):
         return jsonify({"status": "invalid_format"}), 400
-    
+
+    # Si el contenido proviene de WhatsApp y no es texto (archivo, audio, imagen),
+    # responder que no aceptamos archivos y enviar el menú raíz.
+    try:
+        is_file = False
+        if c_type and str(c_type).lower() != "text":
+            is_file = True
+        if not is_file and isinstance(content, dict):
+            for k in ("fileUrl", "fileName", "fileMimeType", "fileSizeBytes", "file_url"):
+                if k in content:
+                    is_file = True
+                    break
+        if is_file:
+            aviso = ("Lo siento, por el momento no puedo recibir archivos. "
+                     "Por favor envía sólo mensajes de texto.")
+            try:
+                enviar_respuesta("wa", message_id, numero, aviso)
+                enviar_menu("wa", message_id, numero, "raiz")
+            except Exception as e:
+                loge(f"Error enviando aviso/menu por archivo entrante: {e}")
+            return jsonify({"status": "file_ignored"}), 200
+    except Exception as e:
+        loge(f"Error detectando tipo de contenido en webhook Zenvia: {e}")
+
     # 4. Procesamiento condicional
     if not mensaje.strip():
         return jsonify({"status": "empty_message"}), 200
@@ -234,20 +273,20 @@ def mensajes_webchat():
 
 @app.route("/chat", methods=["POST"])
 def web_chat():
-    data = request.get_json()
-    mensaje = data.get("message", "")
-    logg(f"web_chat: Recibi: '{mensaje}'")     
+    data = request.get_json() or {}
+    mensaje = (data.get("message") or "").strip()
+    payload = (data.get("payload") or "").strip() or None
+    logg(f"web_chat: Recibi: mensaje='{mensaje}' payload='{payload}'")
 
-    if not mensaje:
-        return jsonify({"error": "Falta el campo 'pregunta'"}), 400
+    if not mensaje and not payload:
+        return jsonify({"error": "Falta 'message' o 'payload'"}), 400
     session_id = session.get("session_id")
-    logg(f"web_chat: session_id: '{session_id}'")     
+    logg(f"web_chat: session_id: '{session_id}'")
     message_id = str(uuid.uuid4())
-    
-    Thread(target=procesar, args=(session_id, mensaje, None, "wc", message_id)).start()
 
-    # 7. Respuesta inmediata para evitar timeout
-    return jsonify({"status": "processing", "message_id":message_id}), 200
+    Thread(target=procesar, args=(session_id, mensaje or payload, payload, "wc", message_id)).start()
+
+    return jsonify({"status": "processing", "message_id": message_id}), 200
 
 def set_browser_state(session_id, active):
     redisdb.set_variable(session_id, "active", active)
@@ -264,21 +303,39 @@ def procesar(numero, mensaje, payload, canal, message_id):
         logg(f"procesar: estado_validacion '{estado}'")
         mensaje_original = mensaje.strip()
 
-        # --- Menú interactivo (solo WhatsApp) ---
-        if canal == "wa":
+        # --- Menú interactivo (WhatsApp y webchat) ---
+        if canal in ("wa", "wc"):
             # Palabra clave: el usuario pide volver al menú principal
             if mensaje_original.lower() in ("menu", "menú", "inicio", "menu principal"):
-                redisdb.del_variable(numero, "estado_validacion")
+                # Si el usuario ya está validado, no eliminar ese estado al abrir el menú
+                try:
+                    if estado != b"validado":
+                        redisdb.del_variable(numero, "estado_validacion")
+                except Exception:
+                    # Si hay cualquier error leyendo/interpretando el estado, borrar por seguridad
+                    redisdb.del_variable(numero, "estado_validacion")
+
+                # Limpiar intent/pregunta pendiente (mantener cod_persona si ya estaba validado)
                 redisdb.del_variable(numero, "intencion_pendiente")
                 redisdb.del_variable(numero, "pregunta_original")
                 redisdb.set_variable(numero, "menu_mostrado", "1")
-                enviar_menu_wa(message_id, numero, "raiz")
+                enviar_menu(canal, message_id, numero, "raiz")
+                try:
+                    # Registrar que el usuario abrió el menú
+                    guardar_interaccion(numero, 0, canal, "menu", None, "Menu mostrado: raiz")
+                except Exception as e:
+                    loge(f"Error guardando interacción de menu: {e}")
                 return
-            # Selección desde una WhatsApp List/Button (Zenvia entrega el id como payload)
+            # Selección desde un botón/list (WA entrega payload por Zenvia, webchat lo envía en el POST)
             if payload:
                 tipo_pl, valor_pl = menu.resolver_payload(payload)
                 if tipo_pl == "MENU":
-                    enviar_menu_wa(message_id, numero, valor_pl)
+                    enviar_menu(canal, message_id, numero, valor_pl)
+                    try:
+                        # Registrar navegación de menú (selección de lista)
+                        guardar_interaccion(numero, 0, canal, payload, None, f"Menu mostrado: {valor_pl}")
+                    except Exception as e:
+                        loge(f"Error guardando interacción de menu (payload MENU): {e}")
                     return
                 if tipo_pl == "INFO":
                     texto = menu.get_info(valor_pl) or "Información no disponible."
@@ -302,17 +359,55 @@ def procesar(numero, mensaje, payload, canal, message_id):
                             t, s, v = r.split("/", 2)
                             entities.append({"tipo": t, "subtipo": s, "valor": v})
                         contexto = conocimiento_general(entities)
-                        result = {"intent": intent_pre, "type": "general", "entity": entities, "context": contexto}
+                        result = {"intent": intent_pre, "type": "general", "entity": entities, "context": contexto, "intent_source": "menu"}
                     else:
                         result = process_query(pregunta_pre)
                         if intent_pre:
                             result["intent"] = intent_pre
+                            result["intent_source"] = "menu"
                         contexto = result.get("context")
                     respuesta = menu.formatear_contexto_general(contexto)
                     if not respuesta:
                         respuesta = "No encontré información para esa opción. Escribe *menu* para volver al menú principal."
                     enviar_respuesta(canal, message_id, numero, respuesta)
                     guardar_interaccion(numero, 0, canal, pregunta_pre, result, respuesta)
+                    return
+                if tipo_pl == "TEL":
+                    # Selección de teléfono para enviar el OTP
+                    try:
+                        idx = int(valor_pl)
+                    except (ValueError, TypeError):
+                        idx = 0
+                    telefonos_b = redisdb.get_variable(numero, "telefonos_otp")
+                    cod_persona_b = redisdb.get_variable(numero, "cod_persona")
+                    nombres_b = redisdb.get_variable(numero, "nombres")
+                    saludo_b = redisdb.get_variable(numero, "saludo_otp")
+                    if telefonos_b and cod_persona_b:
+                        telefonos = json.loads(telefonos_b.decode())
+                        cod_persona = cod_persona_b.decode()
+                        nombres = nombres_b.decode() if nombres_b else ""
+                        saludo = saludo_b.decode() if saludo_b else "Bienvenido/a"
+                        if 0 <= idx < len(telefonos):
+                            celular_elegido = telefonos[idx]
+                        else:
+                            celular_elegido = telefonos[0]
+                        redisdb.del_variable(numero, "telefonos_otp")
+                        redisdb.del_variable(numero, "saludo_otp")
+                        redisdb.set_variable(numero, "estado_validacion", "esperando_otp")
+                        otp = str(randint(100000, 999999))
+                        redisdb.set_variable(numero, "otp", otp, expira=300)
+                        logg(f"OTP generado para {cod_persona} -> tel idx={idx}: {otp}")
+                        sms = f"Este es el código de verificación para validar tu identidad con Real[IA]: {otp}"
+                        pid = envia_sms(celular_elegido, sms)
+                        cel4d = celular_elegido[-4:]
+                        if pid > 0:
+                            respuesta = f"¡{saludo} {nombres}! Te he enviado un código de verificación al número terminado en XXX-XXX-{cel4d}. Por favor indícame el código que recibiste."
+                        else:
+                            respuesta = f"No fue posible enviar el código al número terminado en {cel4d}. Por favor pasa por una sucursal a corregir tus datos."
+                        enviar_respuesta(canal, message_id, numero, respuesta)
+                    else:
+                        enviar_respuesta(canal, message_id, numero,
+                            "Tu sesión expiró. Escribe *menu* para comenzar de nuevo.")
                     return
                 if tipo_pl == "OTP":
                     intent_pre, pregunta_pre = menu.split_intent_query(valor_pl)
@@ -323,6 +418,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                         result = process_query(pregunta_pre)
                         if intent_pre:
                             result["intent"] = intent_pre
+                            result["intent_source"] = "menu"
                         contexto = contexto_cliente(cod_persona, result)
                         respuesta = menu.formatear_contexto_personal(contexto)
                         enviar_respuesta(canal, message_id, numero, respuesta)
@@ -334,7 +430,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                         redisdb.set_variable(numero, "message_id", message_id)
                         redisdb.set_variable(numero, "modo", "menu")
                         enviar_respuesta(canal, message_id, numero,
-                            "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones).")
+                            "Para ayudarte, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones).")
                     return
 
         if len(mensaje_original) > 0 :
@@ -362,30 +458,93 @@ def procesar(numero, mensaje, payload, canal, message_id):
                         if sexo == "F":
                             saludo = "Bienvenida"
                         redisdb.set_variable(numero, "cod_persona", cod_persona)
-                        redisdb.set_variable(numero, "estado_validacion", "esperando_otp")
                         redisdb.set_variable(numero, "nombres", row["nombres"])
+                        # Verificar si hay múltiples teléfonos registrados
+                        telefonos = _parsear_telefonos(celular)
+                        if len(telefonos) > 1:
+                            # Guardar lista y pedir al cliente que elija
+                            redisdb.set_variable(numero, "estado_validacion", "esperando_telefono")
+                            redisdb.set_variable(numero, "telefonos_otp", json.dumps(telefonos))
+                            redisdb.set_variable(numero, "saludo_otp", saludo)
+                            enviar_menu_telefonos(canal, message_id, numero, saludo, nombres, telefonos)
+                            return
+                        # Un solo teléfono: proceder directamente
+                        celular_elegido = telefonos[0] if telefonos else celular
+                        redisdb.set_variable(numero, "estado_validacion", "esperando_otp")
                         # Generar OTP
                         otp = str(randint(100000, 999999))
                         redisdb.set_variable(numero, "otp", otp, expira=300)
                         logg(f"OTP generado para {cod_persona}: {otp}")
-                        sms = f"Este es el código de verificación para consultar tus productos en Real[IA]: {otp}"
-                        pid = envia_sms(celular , sms)       
-                        cel4d = celular[-4:]
+                        sms = f"Este es el código de verificación para validar tu identidad con Real[IA]: {otp}"
+                        pid = envia_sms(celular_elegido, sms)
+                        cel4d = celular_elegido[-4:]
                         if pid > 0:
-                            respuesta = f"!{saludo} {nombres}! Te he enviado un código de verificación a su celular terminado en XXX-XXX-{cel4d}. Por favor indicame el código que recibiste."            
+                            respuesta = f"¡{saludo} {nombres}! Te he enviado un código de verificación a tu celular terminado en XXX-XXX-{cel4d}. Por favor indícame el código que recibiste."
                         else:
-                            respuesta = f"No fue posible enviar un código de verificación OTP a su celular terminado en {cel4d}. Por favor pase por una sucursal a corregir sus datos."
-                        #respuesta = mensaje
-                        #enviar_respuesta(canal, message_id, numero, respuesta)
+                            respuesta = f"No fue posible enviar un código de verificación OTP a tu celular terminado en {cel4d}. Por favor pase por una sucursal a corregir sus datos."
                     else:
                         respuesta = "No encontramos un cliente con esa cédula. Por favor, verifícala."
                         #enviar_respuesta(canal, message_id, numero, respuesta)
                 else:
                     respuesta = ("Estoy esperando tu número de cédula (sin guiones).\n"
-                                 "• Si quieres terminar, responde *cancelar*.\n"
-                                 "• Si prefieres hablar con una persona, responde *agente*.")
+                                 "• Si quieres terminar, responde *cancelar*.\n")
+                                 #"• Si prefieres hablar con una persona, responde *agente*.")
 
-            # --- 2. Si está esperando OTP ---
+            # --- 2. Si está esperando selección de teléfono para OTP ---
+            elif estado == b"esperando_telefono":
+                intencion_val = clasificar_intencion_validacion(mensaje_original)
+                if intencion_val == "cancelar":
+                    limpiar_estado_validacion(numero)
+                    enviar_respuesta(canal, message_id, numero,
+                        "Listo, cancelé la solicitud. Escribe *menu* para ver opciones.")
+                    return
+                if intencion_val == "agente":
+                    enviar_respuesta(canal, message_id, numero, mensaje_contacto_humano())
+                    return
+                # Aceptar "1", "2", etc. como selección
+                telefonos_b = redisdb.get_variable(numero, "telefonos_otp")
+                nombres_b = redisdb.get_variable(numero, "nombres")
+                saludo_b = redisdb.get_variable(numero, "saludo_otp")
+                cod_persona_b = redisdb.get_variable(numero, "cod_persona")
+                if not telefonos_b or not cod_persona_b:
+                    limpiar_estado_validacion(numero)
+                    enviar_respuesta(canal, message_id, numero,
+                        "Tu sesión expiró. Escribe *menu* para comenzar de nuevo.")
+                    return
+                telefonos = json.loads(telefonos_b.decode())
+                cod_persona = cod_persona_b.decode()
+                nombres = nombres_b.decode() if nombres_b else ""
+                saludo = saludo_b.decode() if saludo_b else "Bienvenido/a"
+                # Interpretar selección
+                idx = None
+                if re.fullmatch(r"\d+", mensaje_original.strip()):
+                    n = int(mensaje_original.strip())
+                    if 1 <= n <= len(telefonos):
+                        idx = n - 1
+                if idx is None:
+                    enviar_menu_telefonos(canal, message_id, numero, "Claro", nombres, telefonos)
+                    return
+                    # No se entendió, reenviar menú
+                    #lista = "\n".join(f"{i+1}. XXX-XXX-{t[-4:]}" for i, t in enumerate(telefonos))
+                    #enviar_respuesta(canal, message_id, numero,
+                    #    f"Por favor elige a qué número enviar el código respondiendo con el número de la opción:\n{lista}\n• Para cancelar responde *cancelar*.")
+                    #return
+                celular_elegido = telefonos[idx]
+                redisdb.del_variable(numero, "telefonos_otp")
+                redisdb.del_variable(numero, "saludo_otp")
+                redisdb.set_variable(numero, "estado_validacion", "esperando_otp")
+                otp = str(randint(100000, 999999))
+                redisdb.set_variable(numero, "otp", otp, expira=300)
+                logg(f"OTP generado para {cod_persona} -> tel idx={idx}: {otp}")
+                sms = f"Este es el código de verificación para validar tu identidad con Real[IA]: {otp}"
+                pid = envia_sms(celular_elegido, sms)
+                cel4d = celular_elegido[-4:]
+                if pid > 0:
+                    respuesta = f"¡{saludo} {nombres}! Te he enviado un código de verificación al número terminado en XXX-XXX-{cel4d}. Por favor indícame el código que recibiste."
+                else:
+                    respuesta = f"No fue posible enviar el código al número terminado en {cel4d}. Por favor pasa por una sucursal a corregir tus datos."
+
+            # --- 3. Si está esperando OTP ---
             elif estado == b"esperando_otp":
                 intencion_val = clasificar_intencion_validacion(mensaje_original)
                 if intencion_val == "cancelar":
@@ -403,7 +562,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                     enviar_respuesta(canal, message_id, numero,
                         "Estoy esperando el código de 6 dígitos que te envié por SMS.\n"
                         "• Si no lo recibiste, responde *reenviar*.\n"
-                        "• Si prefieres hablar con una persona, responde *agente*.\n"
+                        #"• Si prefieres hablar con una persona, responde *agente*.\n"
                         "• Para terminar, responde *cancelar*.")
                     return
                 otp_esperado = redisdb.get_variable(numero, "otp")
@@ -443,7 +602,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                 else:
                     respuesta = "OTP incorrecto. Intenta nuevamente."
 
-            # --- 3. Si ya está validado ---
+            # --- 4. Si ya está validado ---
             elif estado == b"validado":
                 tmp_message_id = message_id
                 cod_persona = redisdb.get_variable(numero, "cod_persona").decode()
@@ -464,14 +623,14 @@ def procesar(numero, mensaje, payload, canal, message_id):
                     respuesta = llamada_llm(numero, intent, mensaje, contexto)
                 
 
-            # --- 4. Primer mensaje: detectar intención confidencial ---
+            # --- 5. Primer mensaje: detectar intención confidencial ---
             else:
                 # Primer mensaje de la sesión (estado vacío): mostrar siempre el menú raíz,
                 # sin importar el contenido. La bandera 'menu_mostrado' evita repetirlo
                 # en mensajes siguientes hasta que expire el hash de sesión (~10 min).
-                if canal == "wa" and not payload and not redisdb.get_variable(numero, "menu_mostrado"):
+                if canal in ("wa", "wc") and not payload and not redisdb.get_variable(numero, "menu_mostrado"):
                     redisdb.set_variable(numero, "menu_mostrado", "1")
-                    enviar_menu_wa(message_id, numero, "raiz")
+                    enviar_menu(canal, message_id, numero, "raiz")
                     return
                 is_payload = False
                 if payload:
@@ -514,7 +673,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                     redisdb.set_variable(numero, "intencion_pendiente", intent)
                     redisdb.set_variable(numero, "pregunta_original", mensaje)
                     redisdb.set_variable(numero, "message_id", message_id)
-                    respuesta = "Para darte esa información, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones)."
+                    respuesta = "Para ayudarte mejor, necesito validar tu identidad. Por favor dame tu número de cédula (sin guiones)."
                 # Descomentar para responder sin usar IA
                 elif tipo == 'ayuda':
                     respuesta = contexto[0]["contenido"]
@@ -534,7 +693,8 @@ def notify(session_id, body):
     if active == b"1":
         logg("🟢 Pantalla activa: no se envía push")
         return
-    
+   
+
     message = {
         "title": "Real[IA]",
         "body": body
@@ -563,6 +723,120 @@ def enviar_respuesta(canal, message_id, numero, respuesta):
             enviar_respuesta_wa(message_id, numero, respuesta)
     elif canal == "wc":
         enviar_respuesta_web(message_id, numero, respuesta)
+
+
+def enviar_encuesta(canal, message_id, numero):
+    """Enviar encuesta (solo WhatsApp) — misma firma que enviar_respuesta.
+
+    Busca información en Redis (cliente_id, nombres, telefono) asociada a la clave
+    `numero` (se usa el número de teléfono como clave en muchos flujos). Construye
+    el payload requerido por el servicio de encuestas y, si recibe `url`, envía
+    la URL por WhatsApp reutilizando `enviar_respuesta_wa`.
+    """
+    logg(f"enviar_encuesta:- canal: '{canal}', message_id: '{message_id}', numero: '{numero}'")
+    if canal != "wa":
+        logg("enviar_encuesta: canal no es 'wa', omitiendo")
+        return
+
+    try:
+        # Intentar leer datos desde Redis usando el número como clave
+        cliente_b = redisdb.get_variable(numero, "cliente_id")
+        nombres_b = redisdb.get_variable(numero, "nombres")
+        telefono_b = redisdb.get_variable(numero, "telefono") or redisdb.get_variable(numero, "celular")
+
+        cliente = cliente_b.decode() if isinstance(cliente_b, (bytes, bytearray)) else (str(cliente_b) if cliente_b else "")
+        nombres = nombres_b.decode() if isinstance(nombres_b, (bytes, bytearray)) else (str(nombres_b) if nombres_b else "")
+        telefono = telefono_b.decode() if isinstance(telefono_b, (bytes, bytearray)) else (str(telefono_b) if telefono_b else numero)
+
+        payload = {
+            "cliente": cliente or "",
+            "transaction": numero,
+            "customer_phone": telefono or numero,
+            "customer_name": nombres or "",
+            "survey_id": ENCUESTA_ID
+        }
+
+        headers = {"Content-Type": "application/json"}
+        if ENCUESTA_API_KEY:
+            headers["X-API-Key"] = ENCUESTA_API_KEY
+
+        logg(f"enviar_encuesta: llamando a {ENCUESTA_URL} payload={payload}")
+        r = requests.post(ENCUESTA_URL, json=payload, headers=headers, timeout=10, verify=False)
+        if r.status_code != 200:
+            loge(f"enviar_encuesta: error status {r.status_code} -> {r.text}")
+            return
+        j = r.json()
+        url = j.get("url") if isinstance(j, dict) else None
+        if not url:
+            loge(f"enviar_encuesta: no se devolvió 'url' en la respuesta: {j}")
+            return
+
+        texto = f"Por favor califica tu experiencia: {url} \nGracias por tu tiempo."
+        enviar_respuesta_wa(message_id, numero, texto)
+        logg(f"enviar_encuesta: encuesta enviada a {numero}")
+
+    except Exception as e:
+        loge(f"enviar_encuesta: excepción: {e}")
+
+
+def _redis_expired_event_listener():
+    """Listener que suscribe a eventos de expiración en Redis y actúa.
+
+    Escucha en el canal __keyevent@0__:expired y, cuando una clave con
+    prefijo conocido (p.ej. 'chat:' o 'push:') expira, invoca el envío de
+    la encuesta. Corre en un hilo daemon.
+    """
+    try:
+        r = redisdb.getRedis()
+        pubsub = r.pubsub(ignore_subscribe_messages=True)
+        # Suscribirse al canal de eventos de expiración en la DB 0
+        channel = "__keyevent@0__:expired"
+        pubsub.subscribe(channel)
+        logg(f"_redis_expired_event_listener: suscrito a {channel}")
+        for msg in pubsub.listen():
+            try:
+                if not msg:
+                    continue
+                data = msg.get('data')
+                if not data:
+                    continue
+                if isinstance(data, bytes):
+                    key = data.decode('utf-8')
+                else:
+                    key = str(data)
+                logg(f"_redis_expired_event_listener: expired key='{key}'")
+                # Manejar claves conocidas
+                if key.startswith('chat:'):
+                    session_id = key.split(':', 1)[1]
+                    # Intentar enviar encuesta por push/WA para session
+                    try:
+                        Thread(target=_send_survey_for_session, args=(session_id,), daemon=True).start()
+                    except Exception as e:
+                        loge(f"Error lanzando _send_survey_for_session: {e}")
+                elif key.startswith('push:'):
+                    session_id = key.split(':', 1)[1]
+                    try:
+                        Thread(target=_send_survey_for_session, args=(session_id,), daemon=True).start()
+                    except Exception as e:
+                        loge(f"Error lanzando _send_survey_for_session desde push: {e}")
+                elif key.startswith('phone:') or key.startswith('wa:'):
+                    # Si usas un patrón para keys por telefono
+                    telefono = key.split(':', 1)[1]
+                    try:
+                        Thread(target=_send_survey_for_phone, args=(telefono,), daemon=True).start()
+                    except Exception as e:
+                        loge(f"Error lanzando _send_survey_for_phone: {e}")
+            except Exception as inner:
+                loge(f"_redis_expired_event_listener inner error: {inner}")
+    except Exception as e:
+        loge(f"_redis_expired_event_listener error: {e}")
+
+
+# Arrancar listener de expiraciones en un hilo daemon
+try:
+    Thread(target=_redis_expired_event_listener, daemon=True).start()
+except Exception as e:
+    loge(f"No se pudo iniciar el listener de expiraciones Redis: {e}")
 
 def enviar_respuesta_wa(idRef, telefono, texto):
     max_chars = 4000
@@ -612,10 +886,76 @@ def enviar_menu_wa(idRef, telefono, menu_id):
         logg(f"enviar_menu_wa:\r\n=======INICIO RESPUESTA============\r\n{response.text}\r\n=========FIN RESPUESTA==========")
 
 def enviar_respuesta_web(message_id, session_id, respuesta):
-    redisdb.add_web_message(session_id, message_id, respuesta)
-    notify(session_id, respuesta)
+     # Convertir formato WhatsApp (*bold*, _italic_, ~strike~, `code`) a HTML
+    def _wa_to_html(text):
+        try:
+            import html as _html
+            if text is None:
+                return ""
+            s = _html.escape(str(text))
+            # code blocks `code`
+            s = re.sub(r'`([^`]+)`', r'<code>\1</code>', s)
+            # bold *text*
+            s = re.sub(r'\*(?P<t>[^*]+)\*', r'<strong>\g<t></strong>', s)
+            # italic _text_
+            s = re.sub(r'_(?P<t>[^_]+)_', r'<em>\g<t></em>', s)
+            # strikethrough ~text~
+            s = re.sub(r'~(?P<t>[^~]+)~', r'<s>\g<t></s>', s)
+            # preserve newlines
+            s = s.replace('\n', '<br>')
+            return s
+        except Exception as e:
+            loge(f"_wa_to_html: error formateando texto: {e}")
+            return str(text) if text is not None else ""
+    logg("Convirtiendo formato WhatsApp a HTML")
+    respuesta_html = _wa_to_html(respuesta)
+    redisdb.add_web_message(session_id, message_id, respuesta_html)
+    notify(session_id, respuesta_html)
+
+def enviar_menu_web(message_id, session_id, menu_id):
+    """Envía un menú interactivo al webchat. Se serializa como JSON con type='menu'
+    para que el cliente lo renderice como botones."""
+    m = menu.get_menu(menu_id)
+    if not m:
+        logg(f"enviar_menu_web: menú '{menu_id}' no encontrado")
+        return
+    payload = {
+        "message_id": message_id,
+        "type": "menu",
+        "menu_id": menu_id,
+        "menu": {
+            "header": m.get("header") or "",
+            "body":   m.get("body") or "",
+            "footer": m.get("footer") or "",
+            "button": m.get("button") or "Ver opciones",
+            "sections": m.get("sections") or [],
+        },
+    }
+    rdb = redisdb.getRedis()
+    rdb.rpush(f"mensajes:{session_id}", json.dumps(payload, ensure_ascii=False))
+    notify(session_id, m.get("body") or "Menú disponible")
+
+def enviar_menu(canal, message_id, numero, menu_id):
+    """Dispatcher de menú según canal."""
+    if canal == "wa":
+        enviar_menu_wa(message_id, numero, menu_id)
+    elif canal == "wc":
+        enviar_menu_web(message_id, numero, menu_id)
+
+def mensaje_redirigir_menu():
+    """Mensaje que se envía cuando USE_LLM=false y la conversación entra en una rama
+    que normalmente iría al LLM. Redirige al usuario al menú o al teléfono."""
+    tel = _telefono_cooperativa()
+    base = ("En este momento puedo ayudarte mejor a través del menú. "
+            "Por favor escribe *menu* para ver todas las opciones disponibles.")
+    if tel:
+        base += f"\nSi prefieres hablar con una persona, llámanos al {tel}."
+    return base
 
 def llamada_llm(session_id, intencion, pregunta, contexto_str, is_payload = False):
+    if not USE_LLM:
+        logg(f"llamada_llm: LLM deshabilitado (USE_LLM=false). intent='{intencion}' q='{pregunta}' -> redirige a menú")
+        return mensaje_redirigir_menu()
     try:
         logg(f"llamada_llm: Inicio '{intencion}' '{pregunta}'\r\n{contexto_str}")
         inicio = time.time()
@@ -865,7 +1205,7 @@ def clasificar_intencion_validacion(texto):
 def limpiar_estado_validacion(numero):
     """Limpia las variables del flujo de validación de identidad."""
     for campo in ("estado_validacion", "intencion_pendiente", "pregunta_original",
-                  "message_id", "modo", "otp"):
+                  "message_id", "modo", "otp", "telefonos_otp", "saludo_otp"):
         redisdb.del_variable(numero, campo)
     rdb = redisdb.getRedis()
     rdb.delete(f"otp_ratelimit:{numero}")
@@ -921,6 +1261,63 @@ def reenviar_otp(numero):
     cel4d = cliente["celular"][-4:]
     return f"Te reenvié el código al celular terminado en XXX-XXX-{cel4d}. Por favor indícame el código que recibiste."
 
+
+def _parsear_telefonos(celular_str):
+    """Parsea 'CELULAR,TELEFONO' y retorna lista de números válidos únicos (solo dígitos, mín 7 chars)."""
+    if not celular_str:
+        return []
+    vistos = set()
+    result = []
+    for t in celular_str.split(','):
+        t = t.strip().replace('-', '').replace(' ', '').replace('+', '').replace('.', '')
+        if t and len(t) >= 7 and t not in vistos:
+            vistos.add(t)
+            result.append(t)
+    return result
+
+
+def enviar_menu_telefonos(canal, message_id, numero, saludo, nombres, telefonos):
+    """Envía menú dinámico para que el cliente seleccione a qué número enviar el OTP."""
+    header = "Selección de teléfono"
+    body = f"¡{saludo} {nombres}! ¿A qué número deseas que te enviemos el código de verificación?"
+    rows = [{"id": f"TEL:{i}", "title": f"XXX-XXX-{tel[-4:]}"} for i, tel in enumerate(telefonos)]
+
+    if canal == "wa":
+        contenido = {
+            "type": "list",
+            "header": header[:60],
+            "body": body[:1024],
+            "button": "Seleccionar número",
+            "sections": [{"title":"Teléfonos","rows": rows}],
+        }
+        payload = {
+            "externalId": "realia",
+            "from": ZENVIA_WANUMBER,
+            "to": numero,
+            "contents": [contenido],
+        }
+        response = requests.post(ZENVIA_API, json=payload, headers=ZENVIA_HEADERS, verify=False)
+        if response.status_code != 200:
+            logg(f"enviar_menu_telefonos WA: {response.status_code}")
+            logg(f"enviar_menu_wa:\r\n=======INICIO RESPUESTA============\r\n{response.text}\r\n=========FIN RESPUESTA==========")
+    elif canal == "wc":
+        menu_payload = {
+            "message_id": message_id,
+            "type": "menu",
+            "menu_id": "_tel_otp",
+            "menu": {
+                "header": header,
+                "body": body,
+                "footer": "",
+                "button": "Seleccionar",
+                "sections": [{"title": "Teléfonos registrados", "rows": rows}],
+            },
+        }
+        rdb = redisdb.getRedis()
+        rdb.rpush(f"mensajes:{numero}", json.dumps(menu_payload, ensure_ascii=False))
+        notify(numero, body)
+
+
 def es_saludo(texto):
     saludos = [
         "hola", "buenos días", "buen dia", "buena tarde","buenas tardes", "buenas noches", "buena noche", "qué tal", "cómo estás", "cómo está",
@@ -964,7 +1361,8 @@ def process_query(query: str) -> dict:
                 "intent": None,
                 "type": "general",
                 "entity": None,
-                "context": None
+                "context": None,
+                "intent_source": None,
             }
         tipo = None
         logg(f"process_query: query = '{query}'")
@@ -985,12 +1383,25 @@ def process_query(query: str) -> dict:
             tipo = "personal"            
         
         local_entities = extract_entities(intent, query)
+
+        # Fallback LLM: si reglas no clasificaron (intent=general), pedir al LLM
+        # que elija un intent. Luego re-corremos extract_entities con ese intent.
+        # Sólo para consultas libres (saludo/cierre ya tienen su path).
+        intent_source = "regla"
+        if intent in (None, 'general') and not es_saludo(query) and not es_cierre(query):
+            llm_intent, _ = detect_intent_llm(query)
+            if llm_intent and llm_intent != 'general':
+                intent = llm_intent
+                intent_source = "llm"
+                local_entities = extract_entities(intent, query) or local_entities
+
         if intent == "saldo":
             tipo = "personal"
         result["intent"] = intent
         result["type"] = tipo
         result["entity"] = local_entities
-        logg(f"process_query: intent type '{tipo}' intent = '{intent}' entities = '{local_entities}'")
+        result["intent_source"] = intent_source
+        logg(f"process_query: intent type '{tipo}' intent='{intent}' source={intent_source} entities='{local_entities}'")
         if result["type"] == "general":
             logg(f"process_query: buscando entidades generales '{intent}'")
             contexto = conocimiento_general(local_entities)
@@ -1056,10 +1467,10 @@ def normalize_text(text: str) -> str:
     
     for orig, repl in replacements.items():
         text = text.replace(orig, repl)
-    # Reemplazar sinónimos
+    # Reemplazar sinónimos respetando límites de palabra (evita que 'entrega' rompa 'entregado').
     synonyms = load_json_from_file('synonyms.json')
     for syn, main in synonyms.items():
-        text = text.replace(syn, main)
+        text = re.sub(r'\b' + re.escape(syn) + r'\b', main, text)
     return text.strip()
 
 # Cache de archivos de configuración (intents, entities, context, synonyms, plantillas, ...).
@@ -1145,6 +1556,94 @@ def detect_intent(query: str) -> str:
 
     return 'general'
 
+
+def _intents_validos():
+    """Set de intents válidos según intents.json."""
+    j = load_json_from_file('intents.json') or {}
+    return set(j.keys())
+
+def _rutas_validas():
+    """Set de rutas válidas (tipo/subtipo/valor) según entities.jsonl."""
+    ents = load_jsonl_from_file('entities.jsonl') or []
+    out = set()
+    for it in ents:
+        r = it.get('ruta')
+        if r:
+            out.add(r)
+        t, s, v = it.get('tipo'), it.get('subtipo'), it.get('valor')
+        if t and s and v:
+            out.add(f"{t}/{s}/{v}")
+    return out
+
+_INTENT_HINTS = {
+    'empresa':   'historia, misión, visión, valores, filosofía, contacto, estructura, políticas, cómo afiliarse',
+    'producto':  'cuentas, préstamos, certificados, tarifas, membresías, electrodomésticos, vehículos, paneles solares, agropecuarios',
+    'servicio':  'plan farmacia, plan odontológico, plan funeral, consultorio, casa club, educación, recreación, salud',
+    'sucursal':  'oficinas, direcciones, ubicaciones de las sucursales, horarios',
+    'actividad': 'eventos, talleres, charlas, jornadas, celebraciones',
+    'saldo':     'consultas personales del cliente: mis cuentas, mis préstamos, mis certificados, mi pedido de la feria, dónde está mi orden',
+    'ayuda':     'precios de la feria, bloqueo de tarjeta, internet banking, cómo hago algo, información general',
+    'empleo':    'vacantes, oportunidades de empleo',
+    'saludo':    'hola, buenos días, qué tal',
+}
+
+def detect_intent_llm(query: str):
+    """Fallback de detección de intent vía LLM cuando reglas no clasifican.
+    El LLM SOLO elige el intent (lista corta); la extracción de entities sigue
+    siendo determinista vía extract_entities. Cacheado 5 min en Redis.
+    Retorna (intent, []) o (None, []) si falla."""
+    if not USE_LLM:
+        return None, []
+    if not query or not query.strip():
+        return None, []
+    q_norm = normalize_text(query)
+    cache_key = f"intent_llm:{hashlib.md5(q_norm.encode('utf-8')).hexdigest()}"
+    rdb = redisdb.getRedis()
+    try:
+        cached = rdb.get(cache_key)
+        if cached:
+            return json.loads(cached).get('intent'), []
+    except Exception:
+        pass
+
+    intents_validos = _intents_validos()
+    if not intents_validos:
+        return None, []
+
+    hints = "\n".join(
+        f"- {k}: {v}" for k, v in _INTENT_HINTS.items() if k in intents_validos
+    )
+    prompt = (
+        "Eres un clasificador de intents. NO conversas, sólo respondes JSON.\n\n"
+        "Intents disponibles (con ejemplos):\n" + hints + "\n\n"
+        f'Mensaje del usuario: "{query}"\n\n'
+        "Responde SOLO con un objeto JSON con esta forma EXACTA, sin texto adicional, "
+        "sin Markdown, sin explicaciones:\n"
+        '{"intent":"<uno_de_los_intents>"}\n\n'
+        'Si ninguno encaja claramente, usa "general".'
+    )
+
+    try:
+        respuesta = llama_openai(OLLAMA_URL, OLLAMA_MODEL, prompt) or ""
+        m = re.search(r'\{[^{}]*"intent"[^{}]*\}', respuesta, re.DOTALL)
+        if not m:
+            logg(f"detect_intent_llm: respuesta sin JSON parseable: {respuesta[:200]}")
+            return None, []
+        data = json.loads(m.group(0))
+        intent = (data.get('intent') or '').strip().lower()
+        if intent not in intents_validos:
+            intent = 'general'
+        try:
+            rdb.setex(cache_key, 300, json.dumps({'intent': intent}))
+        except Exception as e:
+            loge(f"detect_intent_llm: error cacheando: {e}")
+        logg(f"detect_intent_llm: '{query}' -> intent='{intent}'")
+        return intent, []
+    except Exception as e:
+        loge(f"detect_intent_llm: error consultando LLM: {e}")
+        return None, []
+
+
 def _stem_es(w):
     """Stemmer mínimo para tolerar plurales en español.
     - 'materiales' -> 'material', 'paneles' -> 'panel' (consonante + 'es').
@@ -1203,7 +1702,10 @@ def extract_entities(intent, query: str) -> Dict:
         objetos_vistos = set()
 
         for obj in mejores_objetos:
-            obj_tuple = tuple(sorted(obj.items()))
+            # Convertir valores no hashables (listas) a tuplas para poder dedupear.
+            obj_tuple = tuple(sorted(
+                (k, tuple(v) if isinstance(v, list) else v) for k, v in obj.items()
+            ))
             if obj_tuple not in objetos_vistos:
                 objetos_vistos.add(obj_tuple)
                 objetos_sin_duplicados.append(obj)
@@ -1314,74 +1816,607 @@ def preguntar_llm(intencion, pregunta, contexto, conversacion, conocimiento_extr
     return "Estamos presentando inconvenientes, por favor intenta en unos minutos"
 
 #######
-# Login page
+# Admin: login + interacciones
+from werkzeug.security import check_password_hash
+import csv
+import io
+
+ADMIN_USER = os.getenv("ADMIN_USER")
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")
+AST_TZ = timezone(timedelta(hours=-4))
+
+def _fmt_ast(ts_str):
+    """Convierte timestamp SQLite (UTC) a 'DD/MM/YYYY hh:mm:ss AM/PM' AST (GMT-4).
+    Implementación manual para evitar %p vacío con locale es_DO."""
+    if not ts_str:
+        return ''
+    try:
+        dt = datetime.strptime(str(ts_str)[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+        d = dt.astimezone(AST_TZ)
+        h12 = d.hour % 12 or 12
+        ampm = 'AM' if d.hour < 12 else 'PM'
+        return f"{d.day:02d}/{d.month:02d}/{d.year} {h12:02d}:{d.minute:02d}:{d.second:02d} {ampm}"
+    except (ValueError, TypeError):
+        return str(ts_str)
+
+def _label_cliente(v):
+    """Etiqueta del cliente para vista admin: 'Cliente <num>' o 'Cliente N/D' si es 0/None."""
+    if v in (None, '', '0', 0):
+        return 'Cliente N/D'
+    return f'Cliente {v}'
+
+_BASE_CSS = """
+:root { --bg:#f5f6f8; --card:#ffffff; --ink:#1f2937; --muted:#6b7280;
+        --pri:#1e3a8a; --pri2:#2563eb; --border:#e5e7eb; --row:#fafafa; }
+* { box-sizing:border-box; }
+body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       background:var(--bg); color:var(--ink); }
+.topbar { background:var(--pri); color:#fff; padding:.75rem 1rem; display:flex;
+          justify-content:space-between; align-items:center; }
+.topbar h1 { margin:0; font-size:1.05rem; font-weight:600; }
+.topbar a { color:#fff; text-decoration:none; opacity:.9; font-size:.9rem; }
+.topbar a:hover { opacity:1; text-decoration:underline; }
+.container { padding:1rem; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:8px;
+        padding:1rem; margin-bottom:1rem; }
+.filtros { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+           gap:.75rem; align-items:end; }
+.filtros label { display:block; font-size:.8rem; color:var(--muted); margin-bottom:.25rem; }
+.filtros input, .filtros select { width:100%; padding:.45rem .5rem; border:1px solid var(--border);
+                                  border-radius:6px; font-size:.9rem; background:#fff; }
+.btn { background:var(--pri2); color:#fff; border:0; padding:.5rem .9rem; border-radius:6px;
+       cursor:pointer; font-size:.9rem; }
+.btn:hover { background:var(--pri); }
+.btn.secondary { background:#fff; color:var(--ink); border:1px solid var(--border); }
+.meta { color:var(--muted); font-size:.85rem; margin:.5rem 0 1rem; }
+.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+         gap:.75rem; margin:.5rem 0 1rem; }
+.stats .stat { background:#fff; border:1px solid var(--border); border-radius:8px;
+               padding:.7rem .9rem; display:flex; flex-direction:column; align-items:flex-start; }
+.stats .stat .num { font-size:1.4rem; font-weight:600; color:var(--ink); }
+.stats .stat .lbl { font-size:.78rem; color:var(--muted); text-transform:uppercase;
+                    letter-spacing:.04em; }
+table { width:100%; border-collapse:collapse; font-size:.85rem; }
+thead th { text-align:left; background:#f0f2f5; padding:.55rem .6rem; border-bottom:1px solid var(--border);
+           font-weight:600; color:var(--ink); position:sticky; top:0; }
+tbody td { padding:.55rem .6rem; border-bottom:1px solid var(--border); vertical-align:top; }
+tbody tr:nth-child(even) { background:var(--row); }
+.txt { white-space:pre-wrap; word-break:break-word; max-width:380px; }
+.tag { display:inline-block; padding:.1rem .45rem; border-radius:999px; font-size:.75rem;
+       background:#dbeafe; color:#1e3a8a; }
+.tag.wa { background:#dcfce7; color:#166534; }
+.tag.wc { background:#fef3c7; color:#92400e; }
+.pager { margin-top:1rem; display:flex; gap:.5rem; justify-content:center; align-items:center; }
+.pager a, .pager span { padding:.4rem .7rem; border-radius:6px; border:1px solid var(--border);
+                       text-decoration:none; color:var(--ink); font-size:.85rem; background:#fff; }
+.pager a:hover { background:#f0f2f5; }
+.pager .actual { background:var(--pri2); color:#fff; border-color:var(--pri2); }
+.errmsg { background:#fee2e2; color:#991b1b; padding:.5rem .7rem; border-radius:6px;
+          margin-bottom:.75rem; font-size:.9rem; }
+.empty { text-align:center; padding:2rem; color:var(--muted); }
+"""
+
 login_html = """
 <!DOCTYPE html>
 <html lang="es">
-<head><title>Login</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Acceso · Real[IA]</title>
+  <style>{{ css|safe }}
+    .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center;
+                  background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%); }
+    .login-card { background:#fff; padding:2rem; border-radius:10px; width:100%; max-width:360px;
+                  box-shadow:0 10px 30px rgba(0,0,0,.15); }
+    .login-card h1 { margin:0 0 .25rem; font-size:1.2rem; }
+    .login-card p.sub { margin:0 0 1.25rem; color:var(--muted); font-size:.85rem; }
+    .login-card label { display:block; font-size:.8rem; color:var(--muted); margin:.5rem 0 .25rem; }
+    .login-card input { width:100%; padding:.55rem .6rem; border:1px solid var(--border);
+                        border-radius:6px; font-size:.95rem; }
+    .login-card .btn { width:100%; margin-top:1rem; padding:.65rem; font-size:.95rem; }
+  </style>
+</head>
 <body>
-    <h2>Login</h2>
-    <form method="POST">
-        Usuario: <input type="text" name="usuario" required><br>
-        Contraseña: <input type="password" name="password" required><br>
-        <button type="submit">Ingresar</button>
-    </form>
-    {% with messages = get_flashed_messages() %}
-      {% if messages %}
-        <ul>
+  <div class="login-wrap">
+    <form method="POST" class="login-card">
+      <h1>Real[IA] · Administración</h1>
+      <p class="sub">Ingresa para ver las interacciones del chatbot.</p>
+      {% with messages = get_flashed_messages() %}
         {% for message in messages %}
-          <li>{{ message }}</li>
+          <div class="errmsg">{{ message }}</div>
         {% endfor %}
-        </ul>
-      {% endif %}
-    {% endwith %}
+      {% endwith %}
+      <label>Usuario</label>
+      <input type="text" name="usuario" required autofocus autocomplete="username">
+      <label>Contraseña</label>
+      <input type="password" name="password" required autocomplete="current-password">
+      <button class="btn" type="submit">Ingresar</button>
+    </form>
+  </div>
 </body>
 </html>
 """
 
-# Página de consulta
 consulta_html = """
 <!DOCTYPE html>
 <html lang="es">
-<head><title>Consulta</title></head>
+<head>
+  <meta charset="utf-8">
+  <title>Interacciones · Real[IA]</title>
+  <style>{{ css|safe }}
+    /* Modal */
+    .modal-bg { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none;
+                align-items:center; justify-content:center; z-index:100; padding:1.5rem; }
+    .modal-bg.open { display:flex; }
+    .modal { background:#fff; border-radius:10px; width:100%; max-width:1100px; height:88vh;
+             display:flex; flex-direction:column; overflow:hidden; box-shadow:0 25px 60px rgba(0,0,0,.3); }
+    .modal-head { background:var(--pri); color:#fff; padding:.7rem 1rem; display:flex;
+                  justify-content:space-between; align-items:center; }
+    .modal-head h2 { margin:0; font-size:1rem; font-weight:600; }
+    .modal-head .close { background:transparent; border:0; color:#fff; font-size:1.3rem;
+                         cursor:pointer; padding:0 .3rem; }
+    .modal-body { flex:1; display:grid; grid-template-columns:1.4fr 1fr; overflow:hidden; }
+    @media (max-width:820px){ .modal-body { grid-template-columns:1fr; } }
+    .panel { display:flex; flex-direction:column; overflow:hidden; border-right:1px solid var(--border); }
+    .panel:last-child { border-right:0; }
+    .panel-head { background:#f0f2f5; padding:.55rem .9rem; font-size:.85rem; font-weight:600;
+                  color:var(--ink); border-bottom:1px solid var(--border); }
+    .panel-body { flex:1; overflow-y:auto; padding:1rem; }
+
+    /* Chat (estilo webchat) */
+    .chat { background:#e5ddd5; }
+    .chat .message { max-width:75%; margin-bottom:.6rem; padding:.55rem .8rem; border-radius:14px;
+                     font-size:.88rem; line-height:1.35; word-break:break-word; white-space:pre-wrap;
+                     box-shadow:0 1px 1px rgba(0,0,0,.08); }
+    .chat .user { align-self:flex-end; background:#dcf8c6; border-bottom-right-radius:2px; }
+    .chat .bot  { align-self:flex-start; background:#ffffff; border-bottom-left-radius:2px; }
+    .chat .row { display:flex; flex-direction:column; margin-bottom:.4rem; }
+    .chat .row.right { align-items:flex-end; }
+    .chat .ts { font-size:.7rem; color:#777; margin-top:.15rem; }
+
+    /* Intents */
+    .turn { border:1px solid var(--border); border-radius:8px; padding:.6rem .75rem;
+            margin-bottom:.6rem; background:#fff; font-size:.85rem; }
+    .turn .head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:.3rem; }
+    .turn .ts { color:var(--muted); font-size:.75rem; }
+    .turn .intent { display:inline-block; background:#dbeafe; color:#1e3a8a; padding:.1rem .5rem;
+                    border-radius:999px; font-weight:600; font-size:.78rem; }
+    .turn .intent.personal { background:#fee2e2; color:#991b1b; }
+    .turn .intent.ayuda { background:#dcfce7; color:#166534; }
+    .turn .intent.saludo { background:#fef3c7; color:#92400e; }
+    .turn .src { display:inline-block; padding:.05rem .4rem; border-radius:6px; font-size:.7rem;
+                 font-weight:600; margin-left:.4rem; vertical-align:middle; }
+    .turn .src.regla { background:#e0e7ff; color:#3730a3; }
+    .turn .src.llm   { background:#fce7f3; color:#9d174d; }
+    .turn .src.menu  { background:#d1fae5; color:#065f46; }
+    .turn .src.\\-   { background:#f3f4f6; color:#6b7280; }
+    .turn .pregunta { color:var(--muted); font-style:italic; margin-bottom:.3rem; }
+    .turn .ents { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.25rem; }
+    .turn .ent { background:#f0f2f5; color:#374151; padding:.08rem .45rem; border-radius:6px;
+                 font-size:.72rem; font-family:ui-monospace,Menlo,Consolas,monospace; }
+    .turn.empty { color:var(--muted); text-align:center; padding:1rem; font-style:italic; }
+    .iconbtn { background:transparent; border:1px solid var(--border); padding:.3rem .6rem;
+               border-radius:6px; cursor:pointer; font-size:.8rem; color:var(--pri); }
+    .iconbtn:hover { background:#eff6ff; }
+
+    /* Listado de conversaciones */
+    .convs { display:flex; flex-direction:column; gap:.5rem; padding:.75rem; }
+    .conv { display:flex; justify-content:space-between; align-items:center; gap:1rem;
+            background:#fff; border:1px solid var(--border); border-radius:8px;
+            padding:.7rem .9rem; cursor:pointer; transition:background .12s, border-color .12s; }
+    .conv:hover { background:#fafbfc; border-color:#cbd5e1; }
+    .conv:focus { outline:2px solid var(--pri2); outline-offset:1px; }
+    .conv .chev { color:var(--muted); font-size:1.25rem; line-height:1; padding-left:.25rem;
+                  user-select:none; }
+    .conv:hover .chev { color:var(--pri2); }
+    .conv .info { flex:1; min-width:0; }
+    .conv .topline { display:flex; flex-wrap:wrap; gap:.6rem 1.1rem; align-items:baseline;
+                     margin-bottom:.25rem; }
+    .conv .topline .cliente { font-weight:600; color:var(--ink); font-size:.95rem; }
+    .conv .topline .sid { font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--muted);
+                          font-size:.78rem; word-break:break-all; }
+    .conv .fechas { color:var(--muted); font-size:.82rem; }
+    .conv .right { display:flex; align-items:center; gap:.75rem; flex-shrink:0; }
+    .conv .msgs { font-size:.78rem; color:var(--muted); white-space:nowrap; }
+    .conv .msgs strong { color:var(--ink); }
+
+    /* Raw intent JSON */
+    .turn .raw { margin-top:.45rem; }
+    .turn .raw pre { background:#f7f8fa; border:1px solid var(--border); padding:.45rem .55rem;
+                     border-radius:6px; margin:0; overflow:auto; font-size:.72rem;
+                     line-height:1.35; max-height:200px; white-space:pre-wrap;
+                     font-family:ui-monospace,Menlo,Consolas,monospace; color:#374151; }
+    .turn .raw summary { cursor:pointer; color:var(--muted); font-size:.72rem;
+                         font-style:italic; padding:.15rem 0; user-select:none; }
+    .turn .raw summary:hover { color:var(--pri2); }
+  </style>
+</head>
 <body>
-    <h2>Consulta SQLite</h2>
-    <a href="{{ url_for('logout') }}">Cerrar sesión</a>
-    <table border="1">
-        <tr>{% for col in columnas %}<th>{{ col }}</th>{% endfor %}</tr>
-        {% for fila in filas %}
-        <tr>{% for item in fila %}<td>{{ item }}</td>{% endfor %}</tr>
+  <div class="topbar">
+    <h1>Real[IA] · Interacciones</h1>
+    <span>Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a></span>
+  </div>
+  <div class="container">
+    <form method="GET" class="card">
+      <div class="filtros">
+        <div>
+          <label>Desde</label>
+          <input type="date" name="desde" value="{{ filtros.desde or '' }}">
+        </div>
+        <div>
+          <label>Hasta</label>
+          <input type="date" name="hasta" value="{{ filtros.hasta or '' }}">
+        </div>
+        <div>
+          <label>Canal</label>
+          <select name="canal">
+            <option value="">Todos</option>
+            <option value="wa" {% if filtros.canal == 'wa' %}selected{% endif %}>WhatsApp</option>
+            <option value="wc" {% if filtros.canal == 'wc' %}selected{% endif %}>Web</option>
+          </select>
+        </div>
+        <div>
+          <label>Buscar</label>
+          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Texto en pregunta o respuesta">
+        </div>
+        <div>
+          <label>Por página</label>
+          <select name="pp">
+            {% for n in [25, 50, 100, 200] %}
+            <option value="{{ n }}" {% if filtros.por_pagina == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="grid-column: span 2; display:flex; gap:.5rem; flex-wrap:wrap;">
+          <button class="btn" type="submit">Filtrar</button>
+          <a class="btn secondary" href="{{ url_for('interacciones') }}">Limpiar</a>
+          <a class="btn secondary" href="{{ url_for('interacciones_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'q':filtros.q}) }}">Exportar CSV</a>
+        </div>
+      </div>
+    </form>
+
+    <div class="stats">
+      <div class="stat"><span class="num">{{ stats.conversaciones }}</span><span class="lbl">conversaciones</span></div>
+      <div class="stat"><span class="num">{{ stats.mensajes }}</span><span class="lbl">mensajes</span></div>
+      <div class="stat"><span class="num">{{ stats.wa }}</span><span class="lbl">WhatsApp</span></div>
+      <div class="stat"><span class="num">{{ stats.wc }}</span><span class="lbl">Web</span></div>
+      <div class="stat"><span class="num">{{ stats.clientes }}</span><span class="lbl">clientes únicos</span></div>
+    </div>
+
+    <div class="meta">
+      Mostrando {{ desde_idx }}–{{ hasta_idx }} de {{ total }} conversaciones.
+    </div>
+
+    <div class="card" style="padding:0;">
+      {% if conversaciones %}
+      <div class="convs">
+        {% for c in conversaciones %}
+        <div class="conv" role="button" tabindex="0"
+             onclick="abrirSesion('{{ c.session_id }}')"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirSesion('{{ c.session_id }}')}">
+          <div class="info">
+            <div class="topline">
+              <span class="cliente">{{ c.cliente }}</span>
+              <span class="sid">{{ c.session_id }}</span>
+            </div>
+            <div class="fechas">{{ c.fecha_inicio }} → {{ c.fecha_fin }}</div>
+          </div>
+          <div class="right">
+            <span class="tag {{ c.canal }}">{{ c.canal }}</span>
+            <span class="msgs"><strong>{{ c.mensajes }}</strong> {% if c.mensajes == 1 %}msg{% else %}msgs{% endif %}</span>
+            <span class="chev" aria-hidden="true">›</span>
+          </div>
+        </div>
         {% endfor %}
-    </table>
+      </div>
+      {% else %}
+      <div class="empty">No hay conversaciones con esos filtros.</div>
+      {% endif %}
+    </div>
+
+    {% if total_paginas > 1 %}
+    <div class="pager">
+      {% if pagina > 1 %}
+        <a href="{{ url_for('interacciones', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'pp':filtros.por_pagina,'p':pagina-1}) }}">← Anterior</a>
+      {% endif %}
+      <span class="actual">Página {{ pagina }} de {{ total_paginas }}</span>
+      {% if pagina < total_paginas %}
+        <a href="{{ url_for('interacciones', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'pp':filtros.por_pagina,'p':pagina+1}) }}">Siguiente →</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Modal de conversación -->
+  <div class="modal-bg" id="modal" onclick="if(event.target.id==='modal')cerrarModal()">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">Conversación</h2>
+        <button class="close" onclick="cerrarModal()" aria-label="Cerrar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="panel">
+          <div class="panel-head">Chat</div>
+          <div class="panel-body chat" id="panel-chat"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">Intents identificados</div>
+          <div class="panel-body" id="panel-intents"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $chat = document.getElementById('panel-chat');
+    const $intents = document.getElementById('panel-intents');
+    const $title = document.getElementById('modal-title');
+    const $modal = document.getElementById('modal');
+
+    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
+    // Convierte timestamp UTC ('YYYY-MM-DD HH:MM:SS' o ISO) a 'DD/MM/YYYY hh:mm:ss AM/PM' AST (GMT-4).
+    function fmtTs(ts){
+      if (!ts) return '';
+      const d = new Date(String(ts).replace(' ','T') + 'Z');
+      if (isNaN(d)) return ts;
+      const a = new Date(d.getTime() - 4*3600*1000);
+      const pad = n => String(n).padStart(2,'0');
+      let h = a.getUTCHours();
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${pad(a.getUTCDate())}/${pad(a.getUTCMonth()+1)}/${a.getUTCFullYear()} ${pad(h)}:${pad(a.getUTCMinutes())}:${pad(a.getUTCSeconds())} ${ampm}`;
+    }
+    function lblCliente(v){
+      return (v == null || v === '' || v === '0' || v === 0) ? 'Cliente N/D' : 'Cliente ' + v;
+    }
+
+    function abrirSesion(sid){
+      $chat.innerHTML = '<p style="text-align:center;color:#666;">Cargando...</p>';
+      $intents.innerHTML = '';
+      $title.textContent = 'Conversación · ' + sid.slice(0,8) + '…';
+      $modal.classList.add('open');
+      fetch('/interacciones/sesion/' + encodeURIComponent(sid))
+        .then(r => r.json())
+        .then(renderSesion)
+        .catch(e => { $chat.innerHTML = '<p style="color:#991b1b;">Error: '+esc(e)+'</p>'; });
+    }
+
+    function cerrarModal(){ $modal.classList.remove('open'); }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(); });
+
+    function renderSesion(data){
+      const msgs = data.mensajes || [];
+      $title.textContent = (data.canal||'?').toUpperCase() + ' · ' + lblCliente(data.cod_persona) + ' · ' + (data.session_id||'');
+      // Chat (panel izquierdo). El cliente está a la izquierda (entrante, blanco),
+      // nuestra respuesta a la derecha (saliente, verde).
+      $chat.innerHTML = msgs.map(m => `
+        <div class="row"><div class="message bot">${esc(m.pregunta)}</div><div class="ts">${fmtTs(m.fecha)}</div></div>
+        <div class="row right"><div class="message user">${esc(m.respuesta)}</div><div class="ts">${fmtTs(m.fecha)}</div></div>
+      `).join('') || '<p style="text-align:center;color:#666;">Sin mensajes.</p>';
+
+      // Intents (panel derecho)
+      $intents.innerHTML = msgs.map(m => {
+        const I = m.intencion;
+        const isObj = I && typeof I === 'object';
+        const intent = (isObj && I.intent) || (typeof I === 'string' ? I : '—');
+        const tipo = (isObj ? (I.type || '') : '').toLowerCase();
+        const ents = isObj && Array.isArray(I.entity) ? I.entity : (isObj && I.entity ? [I.entity] : []);
+        const entHTML = ents.length
+          ? '<div class="ents">' + ents.map(e => {
+              if (e && typeof e === 'object'){
+                const tag = [e.tipo, e.subtipo, e.valor].filter(Boolean).join('/');
+                return '<span class="ent">'+esc(tag||JSON.stringify(e))+'</span>';
+              }
+              return '<span class="ent">'+esc(e)+'</span>';
+            }).join('') + '</div>'
+          : '';
+        const raw = I == null ? '' : JSON.stringify(I, null, 2);
+        const rawHTML = raw
+          ? `<details class="raw"><summary>Ver data raw</summary><pre>${esc(raw)}</pre></details>`
+          : '';
+        const src = (m.intent_source || (isObj ? I.intent_source : '') || '').toLowerCase();
+        const srcHTML = src
+          ? `<span class="src ${esc(src.replace(/[^a-z]/g,''))}" title="Fuente del intent">${esc(src)}</span>`
+          : '';
+        return `<div class="turn">
+          <div class="head">
+            <span class="intent ${esc(tipo)}">${esc(intent)}${tipo?' · '+esc(tipo):''}</span>${srcHTML}
+            <span class="ts">${fmtTs(m.fecha)}</span>
+          </div>
+          <div class="pregunta">"${esc(m.pregunta)}"</div>
+          ${entHTML}
+          ${rawHTML}
+        </div>`;
+      }).join('') || '<div class="turn empty">Sin intents.</div>';
+    }
+  </script>
 </body>
 </html>
 """
+
+def _require_login():
+    if 'usuario' not in session:
+        return redirect(url_for('login'))
+    return None
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        usuario = request.form['usuario']
-        password = request.form['password']
-        if usuario == 'jamalena' and password == 'admin':
+        usuario = request.form.get('usuario', '').strip()
+        password = request.form.get('password', '')
+        if (ADMIN_USER and ADMIN_PASSWORD_HASH
+                and usuario == ADMIN_USER
+                and check_password_hash(ADMIN_PASSWORD_HASH, password)):
             session['usuario'] = usuario
             return redirect(url_for('interacciones'))
-        else:
-            flash('Credenciales incorrectas')
-    return render_template_string(login_html)
+        flash('Credenciales incorrectas')
+    return render_template_string(login_html, css=_BASE_CSS)
 
 @app.route('/logout')
 def logout():
     session.pop('usuario', None)
     return redirect(url_for('login'))
 
+def _filtros_request(req):
+    """Lee filtros comunes desde request.args."""
+    hoy = datetime.now(AST_TZ).strftime('%Y-%m-%d')
+    return {
+        'desde': req.args.get('desde') or hoy,
+        'hasta': req.args.get('hasta') or hoy,
+        'canal': req.args.get('canal') or None,
+        'q':     (req.args.get('q') or '').strip() or None,
+    }
+
+def _stats_periodo(canal, desde, hasta, q):
+    """Stats agregadas para el rango filtrado."""
+    import sqlite3
+    con = sqlite3.connect(os.getenv('SQLITE_DBNAME'))
+    cur = con.cursor()
+    where, params = [], []
+    if canal:
+        where.append('canal = ?'); params.append(canal)
+    if desde:
+        where.append('fecha_hora >= ?'); params.append(desde)
+    if hasta:
+        where.append("fecha_hora < datetime(?, '+1 day')"); params.append(hasta)
+    if q:
+        where.append('(pregunta LIKE ? OR respuesta LIKE ?)')
+        like = f'%{q}%'; params.extend([like, like])
+    w = (' WHERE ' + ' AND '.join(where)) if where else ''
+    cur.execute(
+        f"SELECT COUNT(*), COUNT(DISTINCT session_id), "
+        f"       SUM(CASE WHEN canal='wa' THEN 1 ELSE 0 END), "
+        f"       SUM(CASE WHEN canal='wc' THEN 1 ELSE 0 END), "
+        f"       COUNT(DISTINCT CASE WHEN cod_persona NOT IN ('0','','') AND cod_persona IS NOT NULL THEN cod_persona END) "
+        f"FROM interacciones_chatbot{w}", params)
+    row = cur.fetchone() or (0, 0, 0, 0, 0)
+    con.close()
+    return {
+        'mensajes': row[0] or 0,
+        'conversaciones': row[1] or 0,
+        'wa': row[2] or 0,
+        'wc': row[3] or 0,
+        'clientes': row[4] or 0,
+    }
+
+
 @app.route('/interacciones')
 def interacciones():
-    #if 'usuario' not in session:
-    #    return redirect(url_for('login'))
-    columnas, filas = obtener_interacciones()
-    return render_template_string(consulta_html, filas=filas, columnas=columnas)
+    if (resp := _require_login()) is not None:
+        return resp
+
+    f = _filtros_request(request)
+    try:
+        pagina = max(1, int(request.args.get('p', 1)))
+    except ValueError:
+        pagina = 1
+    try:
+        por_pagina = int(request.args.get('pp', 50))
+    except ValueError:
+        por_pagina = 50
+
+    filas, total = obtener_conversaciones(
+        canal=f['canal'], fecha_desde=f['desde'], fecha_hasta=f['hasta'],
+        q=f['q'], pagina=pagina, por_pagina=por_pagina,
+    )
+    stats = _stats_periodo(f['canal'], f['desde'], f['hasta'], f['q'])
+
+    # Preformatear cada conversación para la vista (fechas en AST 12h, label cliente).
+    conversaciones = [
+        {
+            'session_id':   row[0],
+            'canal':        row[1],
+            'cliente':      _label_cliente(row[2]),
+            'fecha_inicio': _fmt_ast(row[3]),
+            'fecha_fin':    _fmt_ast(row[4]),
+            'mensajes':     row[5],
+        }
+        for row in filas
+    ]
+
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    desde_idx = 0 if total == 0 else (pagina - 1) * por_pagina + 1
+    hasta_idx = min(total, pagina * por_pagina)
+
+    return render_template_string(
+        consulta_html,
+        css=_BASE_CSS,
+        usuario=session.get('usuario'),
+        conversaciones=conversaciones,
+        stats=stats,
+        total=total, total_paginas=total_paginas,
+        pagina=pagina, desde_idx=desde_idx, hasta_idx=hasta_idx,
+        filtros={**f, 'por_pagina': por_pagina},
+    )
+
+
+@app.route('/interacciones/sesion/<session_id>')
+def interaccion_sesion(session_id):
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    mensajes = obtener_mensajes_sesion(session_id)
+    out = []
+    canal = None
+    # cod_persona real: cualquier mensaje no-anónimo (0/None/'').
+    cod_persona = next(
+        (m.get('cod_persona') for m in mensajes
+         if m.get('cod_persona') not in (None, '', '0', 0)),
+        None,
+    )
+    for m in mensajes:
+        if canal is None:
+            canal = m.get('canal')
+        try:
+            intencion = json.loads(m.get('intencion') or 'null')
+        except (TypeError, ValueError):
+            intencion = m.get('intencion')
+        out.append({
+            'id': m.get('id'),
+            'fecha': m.get('fecha_hora'),
+            'pregunta': m.get('pregunta'),
+            'respuesta': m.get('respuesta'),
+            'intencion': intencion,
+            'intent_source': m.get('intent_source'),
+        })
+    return jsonify({
+        'session_id': session_id,
+        'canal': canal,
+        'cod_persona': cod_persona,
+        'mensajes': out,
+    })
+
+
+@app.route('/interacciones/csv')
+def interacciones_csv():
+    if (resp := _require_login()) is not None:
+        return resp
+    f = _filtros_request(request)
+    # Export sin paginar (hasta 50k filas como tope sano).
+    columnas, filas, _total = obtener_interacciones(
+        canal=f['canal'], fecha_desde=f['desde'], fecha_hasta=f['hasta'],
+        q=f['q'], pagina=1, por_pagina=50000,
+    )
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['id','fecha_hora_ast','session_id','cliente','canal','pregunta','intencion','respuesta','intent_source'])
+    fh_idx = columnas.index('fecha_hora') if 'fecha_hora' in columnas else 1
+    cp_idx = columnas.index('cod_persona') if 'cod_persona' in columnas else 3
+    src_idx = columnas.index('intent_source') if 'intent_source' in columnas else None
+    for r in filas:
+        w.writerow([
+            r[0], _fmt_ast(r[fh_idx]), r[2],
+            r[cp_idx] if r[cp_idx] not in (None,'','0',0) else 'N/D',
+            r[4], r[5], r[6], r[7],
+            r[src_idx] if src_idx is not None else '',
+        ])
+    out = buf.getvalue()
+    fname = f"interacciones_{f['desde']}_{f['hasta']}.csv"
+    return app.response_class(
+        out, mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"'}
+    )
 
 #######    
 if __name__ == "__main__":
-    logg(f"api_llm: Usando modelo '{OLLAMA_MODEL}' en '{OLLAMA_URL}'")
+    logg(f"api_llm: Usando modelo '{OLLAMA_MODEL}' en '{OLLAMA_URL}' (USE_LLM={USE_LLM})")
     logg(f"========================================================")
     app.run(host="0.0.0.0", port=8000, debug=True)

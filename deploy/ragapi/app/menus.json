@@ -11,16 +11,37 @@
           { "id": "MENU:feria",                                                              "title": "Feria Madre Feliz" },
           { "id": "MENU:productos",                                                          "title": "Productos" },
           { "id": "MENU:servicios",                                                          "title": "Servicios sociales" },
-          { "id": "INTENT:sucursal|¿Dónde están las sucursales y horarios?",                 "title": "Sucursales" },
+          { "id": "MENU:sucursales",                 "title": "Sucursales" },
           { "id": "MENU:cooperativa",                                                        "title": "Sobre la cooperativa" },
           { "id": "OTP:saldo|Quiero ver el balance de mis cuentas, prestamos y certificados","title": "Mis productos" }
         ]
       }
     ]
   },
+  "sucursales":{
+    "header": "Sucursales de Vega Real",
+   "body": "Aquí puedes encontrar información sobre nuestras sucursales.",
+   "footer":"",
+   "button": "Ver sucursales",
+   "sections":[
+    {
+        "title": "Sucursales",
+        "rows": [          
+          { "id": "INTENT:sucursal|sucursales La Vega", "title": "La Vega" },
+          { "id": "INTENT:sucursal|sucursales Sánchez Ramírez", "title": "Sánchez Ramírez" },
+          { "id": "INTENT:sucursal|sucursales Hermanas Mirabal", "title": "Hermanas Mirabal" },
+          { "id": "INTENT:sucursal|sucursales Duarte", "title": "Duarte" },
+          { "id": "INTENT:sucursal|sucursales Monseñor Nouel", "title": "Monseñor Nouel" },
+          { "id": "INTENT:sucursal|sucursales Espaillat", "title": "Espaillat" },
+          { "id": "INTENT:sucursal|sucursales New York", "title": "New York" },          
+          { "id": "MENU:raiz", "title": "← Menú principal" }
+        ]
+      }
+   ]
+  },
   "feria": {
     "header": "Expo Feria Madre Feliz",
-    "body": "Festival de créditos con precios especiales durante todo el mes de mayo. ¿En qué te podemos ayudar?",
+    "body": "Festival de créditos con precios especiales durante todo el mes de mayo.",
     "footer": "Casa Club Vega Real - Bayacanes",
     "button": "Ver opciones",
     "sections": [

@@ -31,29 +31,9 @@ services:
     volumes:
       - ./CAcert.crt:/tmp/CAcert.crt
       - ./ragapi/app/:/opt/rag/app/
-      - ./ragapi/startup.sh/:/usr/local/bin/startup.sh    
-    environment:
-      DBTYPE: ${DBTYPE}
-      ORACLE_DBSERVER: ${ORACLE_DBSERVER}
-      ORACLE_DBNAME: ${ORACLE_DBNAME}
-      ORACLE_DBPORT: ${ORACLE_DBPORT}
-      ORACLE_DBUSER: ${ORACLE_DBUSER}
-      ORACLE_DBPASSWORD: ${ORACLE_DBPASSWORD}
-      REDIS_DBSERVER: ${REDIS_DBSERVER}
-      REDIS_DBPASSWORD: ${REDIS_DBPASSWORD}
-      SQLITE_DBNAME: ${SQLITE_DBNAME}
-      OLLAMA_URL: ${OLLAMA_URL}
-      OLLAMA_MODEL: ${OLLAMA_MODEL}
-      OLLAMA_HOST: ${OLLAMA_HOST}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      ZENVIA_API: ${ZENVIA_API}
-      ZENVIA_TOKEN: ${ZENVIA_TOKEN}
-      ZENVIA_WANUMBER: ${ZENVIA_WANUMBER}
-      VAPID_CLAIMS: ${VAPID_CLAIMS}
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
-      BASE_PATH: ${BASE_PATH}
+      - ./ragapi/startup.sh/:/usr/local/bin/startup.sh
+    env_file:
+      - .env
     networks:
       backend:
         aliases:
