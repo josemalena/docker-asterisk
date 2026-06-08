@@ -1,5 +1,6 @@
 *private
 local*
+deploy/.env
 sub/*
 !sub/module
 deploy/ragapi/app/__pycache__/
