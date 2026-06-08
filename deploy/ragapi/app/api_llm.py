@@ -372,11 +372,11 @@ def _manejar_respuesta_plantilla(numero, mensaje, message_id, detalle=None):
 @app.route('/webhook/zenvia', methods=['POST', 'GET'])
 def zenvia_webhook():
     client_info = getClientInfo(request)
-    logg(f"Webook - Request: {client_info}")
+    #logg(f"Webook - Request: {client_info}")
     #if request.method != 'POST':
     #    return redirect(url_for('home'))
     data = request.json
-    logg(f"Webook - Mensaje: {data}")
+    #logg(f"Webook - Mensaje: {data}")
     # 1. Filtrado robusto de mensajes
     if data.get("direction") != "IN" or not data.get("message"):
         return jsonify({"status": "ignored"}), 200
@@ -395,12 +395,16 @@ def zenvia_webhook():
         mensaje = mensaje.strip() if isinstance(mensaje, str) else ""
         payload = content.get("payload", "")
         numero = data["message"]["from"]
+        # Nombre del visitante (firstName del webhook) para identificar al remitente.
+        visitor = data["message"].get("visitor") or {}
+        nombre_remitente = visitor.get("firstName") or visitor.get("name") or numero
         guardar_mensaje(
             session_id=message_id,
             telefono=numero,
             canal="wa",
             direccion="IN",
             contenido=mensaje or payload,
+            enviado_por=nombre_remitente,
             metadata=data
         )
     except (KeyError, IndexError):
@@ -2495,7 +2499,8 @@ consulta_html = """
 
       $chat.innerHTML = msgs.map(m => {
         const entrante = String(m.direccion || '').toUpperCase() === 'IN';
-        const autor = entrante ? 'Usuario' : (m.enviado_por || 'Bot/Agente');
+        const ep = (m.enviado_por && m.enviado_por !== 'sistema') ? m.enviado_por : '';
+        const autor = entrante ? (ep || 'Usuario') : (ep || 'Bot/Agente');
         return `<div class="row ${entrante ? '' : 'right'}">
           <div class="message ${entrante ? 'bot' : 'user'}">${esc(m.contenido)}</div>
           <div class="ts">${esc(autor)} · ${fmtTs(m.fecha)}</div>

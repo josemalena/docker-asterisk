@@ -844,12 +844,7 @@ def guardar_mensaje(
                 telefono
             ))
 
-            conversacion_id = cur.lastrowid
-
-            logg(
-                f"guardar_mensaje: conversación creada "
-                f"id={conversacion_id} session={session_id}"
-            )
+            conversacion_id = cur.lastrowid           
 
         #
         # Metadata JSON
@@ -937,7 +932,9 @@ def guardar_mensaje(
             f"conv={conversacion_id} "
             f"msg={mensaje_id} "
             f"dir={direccion} "
-            f"canal={canal}"
+            f"canal={canal} "
+            f"enviado_por={enviado_por} "
+            f"contenido={contenido}"
         )
 
         return {
