@@ -266,7 +266,8 @@ def crear_bd():
         pregunta TEXT NOT NULL,
         intencion TEXT,
         respuesta TEXT NOT NULL,
-        intent_source TEXT
+        intent_source TEXT,
+        detalle TEXT
     )
     ''')
     # Migración: agrega la columna si la tabla ya existía sin ella.
@@ -275,6 +276,86 @@ def crear_bd():
     if 'intent_source' not in cols:
         cursor.execute("ALTER TABLE interacciones_chatbot ADD COLUMN intent_source TEXT")
         logg("crear_db: columna 'intent_source' añadida a interacciones_chatbot")
+    if 'detalle' not in cols:
+        cursor.execute("ALTER TABLE interacciones_chatbot ADD COLUMN detalle TEXT")
+        logg("crear_db: columna 'detalle' añadida a interacciones_chatbot")
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS conversaciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+        session_id TEXT NOT NULL,
+        canal TEXT NOT NULL,
+        canal_origen TEXT NOT NULL,
+
+        cod_persona TEXT,
+        telefono TEXT,
+
+        estado TEXT DEFAULT 'ABIERTA',
+
+        asignado_a TEXT,
+        prioridad TEXT DEFAULT 'NORMAL',
+
+        fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_ultimo_mensaje TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        fecha_cierre TIMESTAMP
+    )''')
+
+    cursor.execute("PRAGMA table_info(conversaciones)")
+    cols_conversaciones = {row[1] for row in cursor.fetchall()}
+    if 'canal' not in cols_conversaciones:
+        cursor.execute("ALTER TABLE conversaciones ADD COLUMN canal TEXT")
+        if 'canal_origen' in cols_conversaciones:
+            cursor.execute("UPDATE conversaciones SET canal = canal_origen WHERE canal IS NULL")
+        logg("crear_db: columna 'canal' añadida a conversaciones")
+    if 'canal_origen' not in cols_conversaciones:
+        cursor.execute("ALTER TABLE conversaciones ADD COLUMN canal_origen TEXT")
+        if 'canal' in cols_conversaciones:
+            cursor.execute("UPDATE conversaciones SET canal_origen = canal WHERE canal_origen IS NULL")
+        logg("crear_db: columna 'canal_origen' añadida a conversaciones")
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS mensajes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+        conversacion_id INTEGER NOT NULL,
+
+        direccion TEXT NOT NULL,
+
+        canal TEXT NOT NULL,
+
+        message_id TEXT,
+        provider_message_id TEXT,
+
+        contenido TEXT,
+
+        tiene_archivo INTEGER DEFAULT 0,
+
+        archivo_nombre TEXT,
+        archivo_tipo TEXT,
+        archivo_url TEXT,
+        archivo_size INTEGER,
+
+        template_id TEXT,
+
+        metadata TEXT,
+
+        fecha_hora TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+        FOREIGN KEY (conversacion_id)
+            REFERENCES conversaciones(id)
+    )''')
+
+    cursor.execute("PRAGMA table_info(mensajes)")
+    cols = {row[1] for row in cursor.fetchall()}
+    if 'enviado_por' not in cols:
+        cursor.execute("ALTER TABLE mensajes ADD COLUMN enviado_por TEXT")
+        logg("crear_db: columna 'enviado_por' añadida a mensajes")
+
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_msg_conv ON mensajes(conversacion_id)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_msg_fecha ON mensajes(fecha_hora)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_msg_template ON mensajes(template_id)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_msg_provider ON mensajes(provider_message_id)''')
     conn.commit()
     conn.close()
     logg(f"crear_db: Base de datos ChatBot lista '{CHATBOT_DB}'")
@@ -473,40 +554,38 @@ CLIENTES = """  c.cod_persona AS id_cliente,
                     AND c.cod_persona = b.cod_cliente
                     AND c.cod_persona = :cod_cliente""" 
 
-#### AQUI VA EL QUERY PARA SACAR LOS PRESTAMOS Y PRODUCTOS DE FERIA
 
-#### 
 def obtener_conversaciones(canal=None, fecha_desde=None, fecha_hasta=None,
                            q=None, cod_persona=None,
                            pagina=1, por_pagina=50):
-    """Devuelve conversaciones agrupadas por session_id, con filtros + paginación.
-    Retorna (filas, total). Cada fila:
-        (session_id, canal, cod_persona, fecha_inicio, fecha_fin, mensajes)."""
+    """Devuelve conversaciones, con filtros sobre sus mensajes y paginación."""
     con = sqlite3.connect(CHATBOT_DB)
     cur = con.cursor()
 
     where = []
     params = []
     if canal:
-        where.append("canal = ?")
+        where.append("m.canal = ?")
         params.append(canal)
     if fecha_desde:
-        where.append("fecha_hora >= ?")
+        where.append("m.fecha_hora >= ?")
         params.append(fecha_desde)
     if fecha_hasta:
-        where.append("fecha_hora < datetime(?, '+1 day')")
+        where.append("m.fecha_hora < datetime(?, '+1 day')")
         params.append(fecha_hasta)
     if cod_persona:
-        where.append("cod_persona = ?")
+        where.append("c.cod_persona = ?")
         params.append(cod_persona)
     if q:
-        where.append("(pregunta LIKE ? OR respuesta LIKE ?)")
+        where.append("m.contenido LIKE ?")
         like = f"%{q}%"
-        params.extend([like, like])
+        params.append(like)
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
     cur.execute(
-        f"SELECT COUNT(DISTINCT session_id) FROM interacciones_chatbot{where_sql}",
+        f"""SELECT COUNT(DISTINCT c.id)
+              FROM conversaciones c
+              JOIN mensajes m ON m.conversacion_id = c.id{where_sql}""",
         params,
     )
     total = cur.fetchone()[0]
@@ -516,16 +595,22 @@ def obtener_conversaciones(canal=None, fecha_desde=None, fecha_hasta=None,
     offset = (pagina - 1) * por_pagina
 
     cur.execute(
-        f"""SELECT session_id,
-                   MAX(canal) AS canal,
-                   MAX(CASE WHEN cod_persona NOT IN ('', '0') AND cod_persona IS NOT NULL
-                            THEN cod_persona END) AS cod_persona,
-                   MIN(fecha_hora) AS fecha_inicio,
-                   MAX(fecha_hora) AS fecha_fin,
-                   COUNT(*)        AS mensajes
-            FROM interacciones_chatbot{where_sql}
-            GROUP BY session_id
-            ORDER BY MAX(fecha_hora) DESC
+        f"""SELECT c.id AS conversacion_id,
+                   c.session_id,
+                   COALESCE(MAX(m.canal), c.canal_origen, c.canal) AS canal,
+                   c.cod_persona,
+                   MIN(m.fecha_hora) AS fecha_inicio,
+                   MAX(m.fecha_hora) AS fecha_fin,
+                   COUNT(m.id) AS mensajes,
+                   COALESCE(
+                       MAX(NULLIF(c.telefono, '')),
+                       MAX(CASE WHEN m.direccion = 'IN' AND json_valid(m.metadata)
+                                THEN json_extract(m.metadata, '$.message.from') END)
+                   ) AS telefono
+              FROM conversaciones c
+              JOIN mensajes m ON m.conversacion_id = c.id{where_sql}
+             GROUP BY c.id, c.session_id, c.canal_origen, c.canal, c.cod_persona
+             ORDER BY MAX(m.fecha_hora) DESC, c.id DESC
             LIMIT ? OFFSET ?""",
         params + [por_pagina, offset],
     )
@@ -534,59 +619,87 @@ def obtener_conversaciones(canal=None, fecha_desde=None, fecha_hasta=None,
     return filas, total
 
 
-def obtener_mensajes_sesion(session_id):
-    """Devuelve los mensajes de una sesión ordenados cronológicamente.
-    Retorna lista de dicts con: id, fecha_hora, canal, cod_persona, pregunta, intencion,
-    respuesta, intent_source."""
+def obtener_conversacion_header(conversacion_id):
+    """Devuelve los datos de cabecera de una conversación (sin mensajes).
+
+    Incluye el teléfono: si la columna está vacía (datos antiguos) se intenta
+    extraer del metadata del mensaje entrante (message.from)."""
     con = sqlite3.connect(CHATBOT_DB)
+    con.row_factory = sqlite3.Row
     cur = con.cursor()
     cur.execute(
-        """SELECT id, fecha_hora, canal, cod_persona, pregunta, intencion, respuesta, intent_source
-           FROM interacciones_chatbot
-           WHERE session_id = ?
-           ORDER BY fecha_hora ASC, id ASC""",
-        (session_id,),
+        """SELECT c.id, c.session_id, c.cod_persona, c.estado, c.asignado_a,
+                  COALESCE(MAX(c.canal), c.canal_origen) AS canal,
+                  COALESCE(
+                      NULLIF(c.telefono, ''),
+                      MAX(CASE WHEN m.direccion = 'IN' AND json_valid(m.metadata)
+                               THEN json_extract(m.metadata, '$.message.from') END)
+                  ) AS telefono
+             FROM conversaciones c
+             LEFT JOIN mensajes m ON m.conversacion_id = c.id
+            WHERE c.id = ?
+            GROUP BY c.id""",
+        (conversacion_id,),
     )
-    columnas = [d[0] for d in cur.description]
-    out = [dict(zip(columnas, row)) for row in cur.fetchall()]
+    row = cur.fetchone()
+    con.close()
+    return dict(row) if row else None
+
+
+def obtener_mensajes_conversacion(conversacion_id):
+    """Devuelve los mensajes de una conversación ordenados cronológicamente."""
+    con = sqlite3.connect(CHATBOT_DB)
+    con.row_factory = sqlite3.Row
+    cur = con.cursor()
+    cur.execute(
+        """SELECT m.id, m.fecha_hora, m.direccion, m.canal, m.contenido,
+                  m.message_id, m.provider_message_id, m.template_id,
+                  m.metadata, m.enviado_por,
+                  c.session_id, c.cod_persona, c.telefono, c.asignado_a
+             FROM mensajes m
+             JOIN conversaciones c ON c.id = m.conversacion_id
+            WHERE m.conversacion_id = ?
+            ORDER BY m.fecha_hora ASC, m.id ASC""",
+        (conversacion_id,),
+    )
+    out = [dict(row) for row in cur.fetchall()]
     con.close()
     return out
 
 
 def obtener_interacciones(canal=None, fecha_desde=None, fecha_hasta=None,
-                          q=None, cod_persona=None, session_id=None,
+                          q=None, cod_persona=None, conversacion_id=None,
                           pagina=1, por_pagina=50):
-    """Devuelve interacciones con filtros + paginación.
-    Retorna (columnas, filas, total)."""
+    """Devuelve mensajes con datos de su conversación para exportación."""
     con = sqlite3.connect(CHATBOT_DB)
     cur = con.cursor()
 
     where = []
     params = []
     if canal:
-        where.append("canal = ?")
+        where.append("m.canal = ?")
         params.append(canal)
     if fecha_desde:
-        where.append("fecha_hora >= ?")
+        where.append("m.fecha_hora >= ?")
         params.append(fecha_desde)
     if fecha_hasta:
-        # incluir todo el día final
-        where.append("fecha_hora < datetime(?, '+1 day')")
+        where.append("m.fecha_hora < datetime(?, '+1 day')")
         params.append(fecha_hasta)
     if cod_persona:
-        where.append("cod_persona = ?")
+        where.append("c.cod_persona = ?")
         params.append(cod_persona)
-    if session_id:
-        where.append("session_id = ?")
-        params.append(session_id)
+    if conversacion_id:
+        where.append("c.id = ?")
+        params.append(conversacion_id)
     if q:
-        where.append("(pregunta LIKE ? OR respuesta LIKE ?)")
+        where.append("m.contenido LIKE ?")
         like = f"%{q}%"
-        params.extend([like, like])
+        params.append(like)
 
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
-    cur.execute(f"SELECT COUNT(*) FROM interacciones_chatbot{where_sql}", params)
+    base = " FROM mensajes m JOIN conversaciones c ON c.id = m.conversacion_id"
+    cur.execute(f"SELECT COUNT(*){base}{where_sql}", params)
     total = cur.fetchone()[0]
 
     pagina = max(1, int(pagina or 1))
@@ -594,8 +707,12 @@ def obtener_interacciones(canal=None, fecha_desde=None, fecha_hasta=None,
     offset = (pagina - 1) * por_pagina
 
     cur.execute(
-        f"SELECT * FROM interacciones_chatbot{where_sql} "
-        f"ORDER BY fecha_hora DESC, id DESC LIMIT ? OFFSET ?",
+        f"""SELECT m.id, m.fecha_hora, c.id AS conversacion_id, c.session_id,
+                   c.cod_persona, m.canal, m.direccion, m.contenido,
+                   m.enviado_por, m.message_id, m.provider_message_id,
+                   m.template_id, m.metadata
+              {base}{where_sql}
+             ORDER BY m.fecha_hora DESC, m.id DESC LIMIT ? OFFSET ?""",
         params + [por_pagina, offset]
     )
     filas = cur.fetchall()
@@ -650,16 +767,213 @@ def obtener_respuestas_plantilla(desde=None, hasta=None, q=None, pagina=1, por_p
     return filas_raw, total
 
 
-def guardar_interaccion(session_id, cod_cliente, canal, pregunta, intencion, respuesta):
+def guardar_mensaje(
+    session_id,
+    canal,
+    direccion,
+    contenido,
+    cod_persona=None,
+    telefono=None,
+    template_id=None,
+    message_id=None,
+    provider_message_id=None,
+    metadata=None,
+    archivo=None,
+    enviado_por='sistema'
+):
+    """
+    Guarda un mensaje dentro de una conversación.
+
+    direccion:
+        IN  = mensaje recibido
+        OUT = mensaje enviado
+
+    archivo:
+    {
+        "nombre": "foto.jpg",
+        "tipo": "image/jpeg",
+        "url": "https://...",
+        "size": 123456
+    }
+    """
+
+    conn = None
+
+    try:
+        conn = sqlite3.connect(CHATBOT_DB)
+        conn.row_factory = sqlite3.Row
+
+        cur = conn.cursor()
+        enviado_por = enviado_por if direccion == 'OUT' else 'usuario'
+        #
+        # Buscar conversación abierta
+        #
+        cur.execute("""
+            SELECT id
+            FROM conversaciones
+            WHERE (session_id = ? OR telefono = ?)
+              AND estado = 'ABIERTA'
+            ORDER BY id DESC
+            LIMIT 1
+        """, (session_id, telefono))
+
+        row = cur.fetchone()
+
+        #
+        # Crear conversación si no existe
+        #
+        if row:
+            conversacion_id = row["id"]
+        else:
+
+            cur.execute("""
+                INSERT INTO conversaciones (
+                    session_id,
+                    canal,
+                    canal_origen,
+                    cod_persona,
+                    telefono,
+                    estado
+                )
+                VALUES (?, ?, ?, ?, ?, 'ABIERTA')
+            """, (
+                session_id,
+                canal,
+                canal,
+                cod_persona,
+                telefono
+            ))
+
+            conversacion_id = cur.lastrowid
+
+            logg(
+                f"guardar_mensaje: conversación creada "
+                f"id={conversacion_id} session={session_id}"
+            )
+
+        #
+        # Metadata JSON
+        #
+        metadata_json = None
+
+        if metadata:
+            metadata_json = json.dumps(
+                metadata,
+                ensure_ascii=False,
+                default=str
+            )
+
+        #
+        # Archivo
+        #
+        tiene_archivo = 0
+        archivo_nombre = None
+        archivo_tipo = None
+        archivo_url = None
+        archivo_size = None
+
+        if archivo:
+            tiene_archivo = 1
+            archivo_nombre = archivo.get("nombre")
+            archivo_tipo = archivo.get("tipo")
+            archivo_url = archivo.get("url")
+            archivo_size = archivo.get("size")
+
+        #
+        # Insertar mensaje
+        #
+        cur.execute("""
+            INSERT INTO mensajes (
+                conversacion_id,
+                direccion,
+                canal,
+                message_id,
+                provider_message_id,
+                contenido,
+                tiene_archivo,
+                archivo_nombre,
+                archivo_tipo,
+                archivo_url,
+                archivo_size,
+                template_id,
+                metadata,
+                enviado_por
+            )
+            VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+        """, (
+            conversacion_id,
+            direccion,
+            canal,
+            message_id,
+            provider_message_id,
+            contenido,
+            tiene_archivo,
+            archivo_nombre,
+            archivo_tipo,
+            archivo_url,
+            archivo_size,
+            template_id,
+            metadata_json,
+            enviado_por
+        ))
+
+        mensaje_id = cur.lastrowid
+
+        #
+        # Actualizar fecha último mensaje
+        #
+        cur.execute("""
+            UPDATE conversaciones
+               SET fecha_ultimo_mensaje = CURRENT_TIMESTAMP
+             WHERE id = ?
+        """, (conversacion_id,))
+
+        conn.commit()
+
+        logg(
+            f"guardar_mensaje: "
+            f"conv={conversacion_id} "
+            f"msg={mensaje_id} "
+            f"dir={direccion} "
+            f"canal={canal}"
+        )
+
+        return {
+            "ok": True,
+            "conversacion_id": conversacion_id,
+            "mensaje_id": mensaje_id
+        }
+
+    except Exception as e:
+
+        if conn:
+            conn.rollback()
+
+        loge(f"guardar_mensaje: {e}")
+
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+    finally:
+
+        if conn:
+            conn.close()
+
+
+def guardar_interaccion(session_id, cod_cliente, canal, pregunta, intencion, respuesta, detalle=None):
     intent_source = intencion.get('intent_source') if isinstance(intencion, dict) else None
     intencion_str = json.dumps(intencion, ensure_ascii=False) if isinstance(intencion, dict) else intencion
     conn = sqlite3.connect(CHATBOT_DB)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO interacciones_chatbot
-        (session_id, cod_persona, canal, pregunta, intencion, respuesta, intent_source)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (session_id, cod_cliente, canal, pregunta, intencion_str, respuesta, intent_source))
+        (session_id, cod_persona, canal, pregunta, intencion, respuesta, intent_source, detalle)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (session_id, cod_cliente, canal, pregunta, intencion_str, respuesta, intent_source, detalle))
     conn.commit()
     conn.close()
     chat = ConversationManager(session_id)

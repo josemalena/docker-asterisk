@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from random import randint
 
 # Base de datos
-from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_sesion, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario
+from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_conversacion, obtener_conversacion_header, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario, guardar_mensaje
 
 # Menú interactivo WhatsApp
 import menu
@@ -220,7 +220,7 @@ def _reenviar_plantilla_zenvia(numero, templateId, fields):
         loge(f"_reenviar_plantilla_zenvia: excepción: {e}")
 
 
-def _manejar_respuesta_plantilla(numero, mensaje, message_id):
+def _manejar_respuesta_plantilla(numero, mensaje, message_id, detalle=None):
     """Detecta si el mensaje entrante de WA es la respuesta a una notificación de plantilla
     enviada por otro sistema (gobernanza, encuestas, etc.) y responde automáticamente.
 
@@ -357,7 +357,7 @@ def _manejar_respuesta_plantilla(numero, mensaje, message_id):
                 {"intent": "respuesta_plantilla", "type": "template",
                  "templateId": templateId, "outgoing_msg_id": outgoing_msg_id,
                  "fields": fields},
-                respuesta
+                respuesta, detalle
             )
         except Exception as e:
             loge(f"_manejar_respuesta_plantilla: error guardando interacción: {e}")
@@ -395,6 +395,14 @@ def zenvia_webhook():
         mensaje = mensaje.strip() if isinstance(mensaje, str) else ""
         payload = content.get("payload", "")
         numero = data["message"]["from"]
+        guardar_mensaje(
+            session_id=message_id,
+            telefono=numero,
+            canal="wa",
+            direccion="IN",
+            contenido=mensaje or payload,
+            metadata=data
+        )
     except (KeyError, IndexError):
         return jsonify({"status": "invalid_format"}), 400
 
@@ -424,14 +432,14 @@ def zenvia_webhook():
     # 4. Procesamiento condicional
     if not mensaje.strip():
         return jsonify({"status": "empty_message"}), 200
-    
+
     # 5. Guardar ID para evitar reprocesamiento
     session["last_processed_msg"] = message_id
     
     logg(f"zenvia_webhook: Procesando: {numero}: {mensaje}")
 
     # 6. Si el mensaje es respuesta a una plantilla enviada por otro sistema, interceptar
-    if _manejar_respuesta_plantilla(numero, mensaje, message_id):
+    if _manejar_respuesta_plantilla(numero, mensaje, message_id, data):
         return jsonify({"status": "template_reply_handled"}), 200
 
     # 7. Lógica de negocio normal
@@ -449,6 +457,7 @@ def mensajes_webchat():
 @app.route("/chat", methods=["POST"])
 def web_chat():
     data = request.get_json() or {}
+
     mensaje = (data.get("message") or "").strip()
     payload = (data.get("payload") or "").strip() or None
     logg(f"web_chat: Recibi: mensaje='{mensaje}' payload='{payload}'")
@@ -456,6 +465,13 @@ def web_chat():
     if not mensaje and not payload:
         return jsonify({"error": "Falta 'message' o 'payload'"}), 400
     session_id = session.get("session_id")
+    guardar_mensaje(
+        session_id=session_id,
+        canal="wc",
+        direccion="IN",
+        contenido=mensaje or payload,
+        metadata=data
+    )
     logg(f"web_chat: session_id: '{session_id}'")
     message_id = str(uuid.uuid4())
 
@@ -894,8 +910,15 @@ def notify(session_id, body):
 
 def enviar_respuesta(canal, message_id, numero, respuesta):
     logg(f"enviar_respuesta:- canal: '{canal}', message_id: '{message_id}', numero: '{numero}',\n- respuesta: '{respuesta}'")
+    guardar_mensaje(
+        session_id=message_id,
+        telefono=numero,
+        canal=canal,
+        direccion="OUT",
+        contenido=respuesta
+    )
     if canal == "wa":
-            enviar_respuesta_wa(message_id, numero, respuesta)
+        enviar_respuesta_wa(message_id, numero, respuesta)
     elif canal == "wc":
         enviar_respuesta_web(message_id, numero, respuesta)
 
@@ -2187,6 +2210,7 @@ consulta_html = """
     .conv .topline { display:flex; flex-wrap:wrap; gap:.6rem 1.1rem; align-items:baseline;
                      margin-bottom:.25rem; }
     .conv .topline .cliente { font-weight:600; color:var(--ink); font-size:.95rem; }
+    .conv .topline .tel { color:var(--pri2); font-size:.85rem; font-weight:500; white-space:nowrap; }
     .conv .topline .sid { font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--muted);
                           font-size:.78rem; word-break:break-all; }
     .conv .fechas { color:var(--muted); font-size:.82rem; }
@@ -2203,6 +2227,28 @@ consulta_html = """
     .turn .raw summary { cursor:pointer; color:var(--muted); font-size:.72rem;
                          font-style:italic; padding:.15rem 0; user-select:none; }
     .turn .raw summary:hover { color:var(--pri2); }
+
+    /* Toggle de intents */
+    .modal-head .actions { display:flex; align-items:center; gap:.5rem; }
+    .modal-head .htoggle { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.4);
+                           color:#fff; font-size:.78rem; padding:.25rem .6rem; border-radius:6px;
+                           cursor:pointer; }
+    .modal-head .htoggle:hover { background:rgba(255,255,255,.28); }
+    .modal-body.hide-intents { grid-template-columns:1fr; }
+    .modal-body.hide-intents .panel-intents { display:none; }
+
+    /* Compositor de mensajes */
+    .composer { display:flex; gap:.5rem; padding:.6rem; border-top:1px solid var(--border);
+                background:#f7f8fa; align-items:flex-end; }
+    .composer textarea { flex:1; resize:none; min-height:38px; max-height:120px; padding:.5rem .6rem;
+                         border:1px solid var(--border); border-radius:8px; font-size:.88rem;
+                         font-family:inherit; line-height:1.35; }
+    .composer textarea:focus { outline:2px solid var(--pri2); outline-offset:0; border-color:var(--pri2); }
+    .composer .send { background:var(--pri2); color:#fff; border:0; border-radius:8px;
+                      padding:.5rem .95rem; font-size:.88rem; cursor:pointer; white-space:nowrap; }
+    .composer .send:hover { background:var(--pri); }
+    .composer .send:disabled { opacity:.55; cursor:not-allowed; }
+    .composer .hint { font-size:.7rem; color:#991b1b; padding:.2rem .6rem; }
   </style>
 </head>
 <body>
@@ -2234,7 +2280,7 @@ consulta_html = """
         </div>
         <div>
           <label>Buscar</label>
-          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Texto en pregunta o respuesta">
+          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Texto del mensaje">
         </div>
         <div>
           <label>Por página</label>
@@ -2269,12 +2315,13 @@ consulta_html = """
       <div class="convs">
         {% for c in conversaciones %}
         <div class="conv" role="button" tabindex="0"
-             onclick="abrirSesion('{{ c.session_id }}')"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirSesion('{{ c.session_id }}')}">
+             onclick="abrirConversacion({{ c.conversacion_id }})"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirConversacion({{ c.conversacion_id }})}">
           <div class="info">
             <div class="topline">
               <span class="cliente">{{ c.cliente }}</span>
-              <span class="sid">{{ c.session_id }}</span>
+              {% if c.telefono %}<span class="tel">{{ c.telefono }}</span>{% endif %}
+              <span class="sid">Conversación #{{ c.conversacion_id }}</span>
             </div>
             <div class="fechas">{{ c.fecha_inicio }} → {{ c.fecha_fin }}</div>
           </div>
@@ -2309,14 +2356,23 @@ consulta_html = """
     <div class="modal">
       <div class="modal-head">
         <h2 id="modal-title">Conversación</h2>
-        <button class="close" onclick="cerrarModal()" aria-label="Cerrar">×</button>
+        <div class="actions">
+          <button class="htoggle" id="btn-toggle-intents" onclick="toggleIntents()">Ocultar intents</button>
+          <button class="close" onclick="cerrarModal()" aria-label="Cerrar">×</button>
+        </div>
       </div>
-      <div class="modal-body">
+      <div class="modal-body" id="modal-body">
         <div class="panel">
           <div class="panel-head">Chat</div>
           <div class="panel-body chat" id="panel-chat"></div>
+          <div class="composer">
+            <textarea id="composer-text" placeholder="Escribe un mensaje…" rows="1"
+                      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"></textarea>
+            <button class="send" id="composer-send" onclick="enviarMensaje()">Enviar</button>
+          </div>
+          <div class="hint" id="composer-hint" style="display:none;"></div>
         </div>
-        <div class="panel">
+        <div class="panel panel-intents">
           <div class="panel-head">Intents identificados</div>
           <div class="panel-body" id="panel-intents"></div>
         </div>
@@ -2329,6 +2385,15 @@ consulta_html = """
     const $intents = document.getElementById('panel-intents');
     const $title = document.getElementById('modal-title');
     const $modal = document.getElementById('modal');
+    const $body = document.getElementById('modal-body');
+    const $text = document.getElementById('composer-text');
+    const $send = document.getElementById('composer-send');
+    const $hint = document.getElementById('composer-hint');
+    const $btnToggle = document.getElementById('btn-toggle-intents');
+
+    let convActual = null;     // id de la conversación abierta
+    let canalActual = null;    // 'wa' | 'wc' | ...
+    let pollTimer = null;      // intervalo de refresco para "recibir"
 
     function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
     // Convierte timestamp UTC ('YYYY-MM-DD HH:MM:SS' o ISO) a 'DD/MM/YYYY hh:mm:ss AM/PM' AST (GMT-4).
@@ -2347,29 +2412,98 @@ consulta_html = """
       return (v == null || v === '' || v === '0' || v === 0) ? 'Cliente N/D' : 'Cliente ' + v;
     }
 
-    function abrirSesion(sid){
-      $chat.innerHTML = '<p style="text-align:center;color:#666;">Cargando...</p>';
-      $intents.innerHTML = '';
-      $title.textContent = 'Conversación · ' + sid.slice(0,8) + '…';
-      $modal.classList.add('open');
-      fetch('/interacciones/sesion/' + encodeURIComponent(sid))
-        .then(r => r.json())
-        .then(renderSesion)
-        .catch(e => { $chat.innerHTML = '<p style="color:#991b1b;">Error: '+esc(e)+'</p>'; });
+    // ── Toggle de intents ──────────────────────────────────────────────
+    function toggleIntents(){
+      const oculto = $body.classList.toggle('hide-intents');
+      $btnToggle.textContent = oculto ? 'Mostrar intents' : 'Ocultar intents';
     }
 
-    function cerrarModal(){ $modal.classList.remove('open'); }
+    // ── Recibir: refresco periódico de la conversación abierta ─────────
+    function cargarConversacion(inicial){
+      if (convActual == null) return;
+      fetch('/interacciones/conversacion/' + encodeURIComponent(convActual))
+        .then(r => r.json())
+        .then(d => renderConversacion(d, inicial))
+        .catch(e => { if (inicial) $chat.innerHTML = '<p style="color:#991b1b;">Error: '+esc(e)+'</p>'; });
+    }
+
+    function abrirConversacion(conversacionId){
+      convActual = conversacionId;
+      $chat.innerHTML = '<p style="text-align:center;color:#666;">Cargando...</p>';
+      $intents.innerHTML = '';
+      $title.textContent = 'Conversación #' + conversacionId;
+      $hint.style.display = 'none';
+      $text.value = '';
+      $modal.classList.add('open');
+      cargarConversacion(true);
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => cargarConversacion(false), 4000);  // "recibir"
+    }
+
+    function cerrarModal(){
+      $modal.classList.remove('open');
+      convActual = null;
+      if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+    }
     document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(); });
 
-    function renderSesion(data){
+    // ── Enviar mensaje del agente ──────────────────────────────────────
+    function enviarMensaje(){
+      const texto = ($text.value || '').trim();
+      if (!texto || convActual == null) return;
+      $send.disabled = true;
+      $hint.style.display = 'none';
+      fetch('/interacciones/conversacion/' + encodeURIComponent(convActual) + '/enviar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({texto})
+      })
+        .then(r => r.json().then(j => ({ok: r.ok, j})))
+        .then(({ok, j}) => {
+          if (ok && j.ok){
+            $text.value = '';
+            $text.style.height = 'auto';
+            cargarConversacion(false);
+          } else {
+            const err = (j && j.error) || 'error';
+            $hint.textContent = err === 'sin_telefono'
+              ? 'No hay teléfono asociado para enviar por WhatsApp.'
+              : 'No se pudo enviar el mensaje (' + esc(err) + ').';
+            $hint.style.display = 'block';
+          }
+        })
+        .catch(e => { $hint.textContent = 'Error de red al enviar.'; $hint.style.display = 'block'; })
+        .finally(() => { $send.disabled = false; });
+    }
+
+    // Auto-crecer el textarea
+    if ($text){
+      $text.addEventListener('input', () => {
+        $text.style.height = 'auto';
+        $text.style.height = Math.min($text.scrollHeight, 120) + 'px';
+      });
+    }
+
+    function renderConversacion(data, inicial){
       const msgs = data.mensajes || [];
-      $title.textContent = (data.canal||'?').toUpperCase() + ' · ' + lblCliente(data.cod_persona) + ' · ' + (data.session_id||'');
-      // Chat (panel izquierdo). El cliente está a la izquierda (entrante, blanco),
-      // nuestra respuesta a la derecha (saliente, verde).
-      $chat.innerHTML = msgs.map(m => `
-        <div class="row"><div class="message bot">${esc(m.pregunta)}</div><div class="ts">${fmtTs(m.fecha)}</div></div>
-        <div class="row right"><div class="message user">${esc(m.respuesta)}</div><div class="ts">${fmtTs(m.fecha)}</div></div>
-      `).join('') || '<p style="text-align:center;color:#666;">Sin mensajes.</p>';
+      canalActual = data.canal || null;
+      const tel = data.telefono ? ' · ' + esc(data.telefono) : '';
+      $title.innerHTML = esc((data.canal||'?').toUpperCase()) + ' · ' + esc(lblCliente(data.cod_persona)) + tel + ' · Conversación #' + esc(data.conversacion_id);
+
+      // ¿El usuario estaba viendo el final? (para no romper su scroll al refrescar)
+      const pegadoAlFondo = inicial || ($chat.scrollHeight - $chat.scrollTop - $chat.clientHeight) < 60;
+
+      $chat.innerHTML = msgs.map(m => {
+        const entrante = String(m.direccion || '').toUpperCase() === 'IN';
+        const autor = entrante ? 'Usuario' : (m.enviado_por || 'Bot/Agente');
+        return `<div class="row ${entrante ? '' : 'right'}">
+          <div class="message ${entrante ? 'bot' : 'user'}">${esc(m.contenido)}</div>
+          <div class="ts">${esc(autor)} · ${fmtTs(m.fecha)}</div>
+        </div>`;
+      }).join('') || '<p style="text-align:center;color:#666;">Sin mensajes.</p>';
+      // Mostrar el mensaje más nuevo: los mensajes van en orden cronológico, así que
+      // posicionamos el scroll del chat hasta el final (último = más reciente).
+      if (pegadoAlFondo) $chat.scrollTop = $chat.scrollHeight;
 
       // Intents (panel derecho)
       $intents.innerHTML = msgs.map(m => {
@@ -2400,7 +2534,7 @@ consulta_html = """
             <span class="intent ${esc(tipo)}">${esc(intent)}${tipo?' · '+esc(tipo):''}</span>${srcHTML}
             <span class="ts">${fmtTs(m.fecha)}</span>
           </div>
-          <div class="pregunta">"${esc(m.pregunta)}"</div>
+          <div class="pregunta">"${esc(m.contenido)}"</div>
           ${entHTML}
           ${rawHTML}
         </div>`;
@@ -2507,7 +2641,7 @@ plantillas_html = """
             <td class="tel">{{ r.telefono }}</td>
             <td class="nombre">{{ r.nombre or '—' }}</td>
             <td class="desc">
-              {{ r.descripcion or '—' }}
+              {{ r.descripcion or 'Encuesta' }}
               {% if r.fields_json %}
               <details class="fd"><summary>Ver todos los campos</summary><pre>{{ r.fields_json }}</pre></details>
               {% endif %}
@@ -2518,9 +2652,6 @@ plantillas_html = """
                    style="color:var(--pri2);text-decoration:none;font-size:.8rem;word-break:break-all;">
                   {{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}
                 </a>
-                <span class="badge con-url" style="display:block;margin-top:.2rem;">✓ URL disponible</span>
-              {% else %}
-                <span class="badge sin-url">Sin URL — plantilla reenviada</span>
               {% endif %}
             </td>
             <td class="msg">{{ r.mensaje }}</td>
@@ -2611,8 +2742,13 @@ def respuestas_plantilla():
         desde=f['desde'], hasta=f['hasta'], q=f['q'],
         pagina=pagina, por_pagina=por_pagina,
     )
-    filas = [_parse_plantilla_row(r) for r in filas_raw]
-    con_url = 0# sum(1 for r in filas if r['url'])
+    filas = []
+
+    for r in filas_raw:
+        fila = _parse_plantilla_row(r)
+        if fila:
+            filas.append(fila)
+    con_url = sum(1 for r in filas if r['url'])
     sin_url = len(filas) - con_url
 
     total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
@@ -2701,21 +2837,21 @@ def _stats_periodo(canal, desde, hasta, q):
     cur = con.cursor()
     where, params = [], []
     if canal:
-        where.append('canal = ?'); params.append(canal)
+        where.append('m.canal = ?'); params.append(canal)
     if desde:
-        where.append('fecha_hora >= ?'); params.append(desde)
+        where.append('m.fecha_hora >= ?'); params.append(desde)
     if hasta:
-        where.append("fecha_hora < datetime(?, '+1 day')"); params.append(hasta)
+        where.append("m.fecha_hora < datetime(?, '+1 day')"); params.append(hasta)
     if q:
-        where.append('(pregunta LIKE ? OR respuesta LIKE ?)')
-        like = f'%{q}%'; params.extend([like, like])
+        where.append('m.contenido LIKE ?')
+        params.append(f'%{q}%')
     w = (' WHERE ' + ' AND '.join(where)) if where else ''
     cur.execute(
-        f"SELECT COUNT(*), COUNT(DISTINCT session_id), "
-        f"       SUM(CASE WHEN canal='wa' THEN 1 ELSE 0 END), "
-        f"       SUM(CASE WHEN canal='wc' THEN 1 ELSE 0 END), "
-        f"       COUNT(DISTINCT CASE WHEN cod_persona NOT IN ('0','','') AND cod_persona IS NOT NULL THEN cod_persona END) "
-        f"FROM interacciones_chatbot{w}", params)
+        f"SELECT COUNT(m.id), COUNT(DISTINCT c.id), "
+        f"       SUM(CASE WHEN m.canal='wa' THEN 1 ELSE 0 END), "
+        f"       SUM(CASE WHEN m.canal='wc' THEN 1 ELSE 0 END), "
+        f"       COUNT(DISTINCT CASE WHEN c.cod_persona NOT IN ('0','','') AND c.cod_persona IS NOT NULL THEN c.cod_persona END) "
+        f"FROM mensajes m JOIN conversaciones c ON c.id=m.conversacion_id{w}", params)
     row = cur.fetchone() or (0, 0, 0, 0, 0)
     con.close()
     return {
@@ -2751,12 +2887,14 @@ def interacciones():
     # Preformatear cada conversación para la vista (fechas en AST 12h, label cliente).
     conversaciones = [
         {
-            'session_id':   row[0],
-            'canal':        row[1],
-            'cliente':      _label_cliente(row[2]),
-            'fecha_inicio': _fmt_ast(row[3]),
-            'fecha_fin':    _fmt_ast(row[4]),
-            'mensajes':     row[5],
+            'conversacion_id': row[0],
+            'session_id':      row[1],
+            'canal':           row[2],
+            'cliente':         _label_cliente(row[3]),
+            'fecha_inicio':    _fmt_ast(row[4]),
+            'fecha_fin':       _fmt_ast(row[5]),
+            'mensajes':        row[6],
+            'telefono':        (row[7] if row[2] != 'wc' else None),
         }
         for row in filas
     ]
@@ -2777,40 +2915,98 @@ def interacciones():
     )
 
 
-@app.route('/interacciones/sesion/<session_id>')
-def interaccion_sesion(session_id):
+@app.route('/interacciones/conversacion/<int:conversacion_id>')
+def interaccion_conversacion(conversacion_id):
     if 'usuario' not in session:
         return jsonify({'error': 'unauthorized'}), 401
-    mensajes = obtener_mensajes_sesion(session_id)
+    mensajes = obtener_mensajes_conversacion(conversacion_id)
+    if not mensajes:
+        return jsonify({'error': 'not_found'}), 404
     out = []
-    canal = None
-    # cod_persona real: cualquier mensaje no-anónimo (0/None/'').
-    cod_persona = next(
-        (m.get('cod_persona') for m in mensajes
-         if m.get('cod_persona') not in (None, '', '0', 0)),
-        None,
-    )
+    canal = mensajes[0].get('canal')
+    cod_persona = mensajes[0].get('cod_persona')
+    session_id = mensajes[0].get('session_id')
+    telefono = mensajes[0].get('telefono') or None
     for m in mensajes:
-        if canal is None:
-            canal = m.get('canal')
+        metadata = None
         try:
-            intencion = json.loads(m.get('intencion') or 'null')
+            metadata = json.loads(m.get('metadata') or 'null')
         except (TypeError, ValueError):
-            intencion = m.get('intencion')
+            metadata = m.get('metadata')
+        intencion = metadata.get('intencion') if isinstance(metadata, dict) else None
+        # Teléfono: para canales no-web viene en el metadata del mensaje entrante (message.from).
+        if not telefono and isinstance(metadata, dict):
+            msg = metadata.get('message')
+            if isinstance(msg, dict) and msg.get('from'):
+                telefono = msg.get('from')
         out.append({
             'id': m.get('id'),
             'fecha': m.get('fecha_hora'),
-            'pregunta': m.get('pregunta'),
-            'respuesta': m.get('respuesta'),
+            'direccion': m.get('direccion'),
+            'contenido': m.get('contenido'),
+            'enviado_por': m.get('enviado_por'),
             'intencion': intencion,
-            'intent_source': m.get('intent_source'),
+            'intent_source': metadata.get('intent_source') if isinstance(metadata, dict) else None,
         })
     return jsonify({
+        'conversacion_id': conversacion_id,
         'session_id': session_id,
         'canal': canal,
         'cod_persona': cod_persona,
+        'telefono': telefono if canal != 'wc' else None,
         'mensajes': out,
     })
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/enviar', methods=['POST'])
+def interaccion_enviar(conversacion_id):
+    """Envía un mensaje del agente dentro de una conversación existente y lo
+    persiste como OUT (enviado_por = usuario de la sesión)."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+
+    texto = (request.json or {}).get('texto', '') if request.is_json else request.form.get('texto', '')
+    texto = (texto or '').strip()
+    if not texto:
+        return jsonify({'error': 'empty'}), 400
+
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+
+    canal = header.get('canal')
+    session_id = header.get('session_id')
+    telefono = header.get('telefono')
+    agente = session.get('usuario')
+    message_id = str(uuid.uuid4())
+
+    # Para WhatsApp necesitamos el teléfono destino.
+    if canal == 'wa' and not telefono:
+        return jsonify({'error': 'sin_telefono'}), 400
+
+    try:
+        # Persistir como OUT en la MISMA conversación (usa el session_id existente).
+        guardar_mensaje(
+            session_id=session_id,
+            canal=canal,
+            direccion='OUT',
+            contenido=texto,
+            telefono=telefono,
+            message_id=message_id,
+            enviado_por=agente,
+        )
+        # Entregar por el canal correspondiente.
+        if canal == 'wa':
+            enviar_respuesta_wa(message_id, telefono, texto)
+        elif canal == 'wc':
+            enviar_respuesta_web(message_id, session_id, texto)
+        else:
+            return jsonify({'error': 'canal_no_soportado'}), 400
+    except Exception as e:
+        loge(f"interaccion_enviar: error enviando mensaje: {e}")
+        return jsonify({'error': 'send_failed', 'detalle': str(e)}), 500
+
+    return jsonify({'ok': True, 'message_id': message_id})
 
 
 @app.route('/interacciones/csv')
@@ -2825,17 +3021,14 @@ def interacciones_csv():
     )
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(['id','fecha_hora_ast','session_id','cliente','canal','pregunta','intencion','respuesta','intent_source'])
+    w.writerow(['id','fecha_hora_ast','conversacion_id','session_id','cliente','canal','direccion','contenido','enviado_por','message_id','provider_message_id','template_id','metadata'])
     fh_idx = columnas.index('fecha_hora') if 'fecha_hora' in columnas else 1
-    cp_idx = columnas.index('cod_persona') if 'cod_persona' in columnas else 3
-    src_idx = columnas.index('intent_source') if 'intent_source' in columnas else None
+    cp_idx = columnas.index('cod_persona')
     for r in filas:
-        w.writerow([
-            r[0], _fmt_ast(r[fh_idx]), r[2],
-            r[cp_idx] if r[cp_idx] not in (None,'','0',0) else 'N/D',
-            r[4], r[5], r[6], r[7],
-            r[src_idx] if src_idx is not None else '',
-        ])
+        row = list(r)
+        row[fh_idx] = _fmt_ast(row[fh_idx])
+        row[cp_idx] = row[cp_idx] if row[cp_idx] not in (None,'','0',0) else 'N/D'
+        w.writerow(row)
     out = buf.getvalue()
     fname = f"interacciones_{f['desde']}_{f['hasta']}.csv"
     return app.response_class(
