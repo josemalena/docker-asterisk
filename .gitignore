@@ -4,6 +4,7 @@ deploy/.env
 sub/*
 !sub/module
 deploy/ragapi/app/__pycache__/
+deploy/ragapi/app/*.db
 deploy/ragapi/data/models/
 deploy/ragapi/instantclient_19_26/
 deploy/ragsterisk/app/sound/

@@ -398,8 +398,8 @@ COPY	src/*/nft $DOCKER_SEED_NFT_DIR/
 COPY	sub/*/module $DOCKER_DL_DIR/
 ```
 
-There is also a mechanism for excluding files from being copied to the image from some source-module directories. Source-module directories to be excluded are listed in the file [`.dockerignore`](https://docs.docker.com/engine/reference/builder/#dockerignore-file). Since we don't want files from the module `notused` we list it in the `.dockerignore` file:
+There is also a mechanism for excluding files from being copied to the image from some source-module directories. Source-module directories to be excluded are listed in the file [`.dockerignore`](https://docs.docker.com/engine/reference/builder/#dockerignore-file). For example, to keep a source module out of the image, list its directory under `src/` in the `.dockerignore` file:
 
 ```sh
-src/notused
+src/<module>
 ```
