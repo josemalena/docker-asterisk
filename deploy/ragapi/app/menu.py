@@ -92,8 +92,8 @@ def split_intent_query(valor: str) -> Tuple[str, str]:
 
 
 _INTROS_MARKETING = {
-    ('producto','cuenta'):         ("Te presentamos esta cuenta:", "Te presentamos nuestras cuentas:"),
-    ('producto','prestamo'):       ("Conoce este tipo de préstamo:", "Nuestros préstamos te apoyan en cada etapa:"),
+    ('producto','cuenta'):         ("Te presentamos la cuenta:", "Te presentamos nuestras cuentas:"),
+    ('producto','prestamo'):       ("Conoce el tipo de préstamo:", "Nuestros préstamos te apoyan en cada etapa:"),
     ('producto','prestamo_feria'): ("Conoce este financiamiento de la Expo Feria Madre Feliz:", "Nuestros financiamientos especiales de la Expo Feria Madre Feliz:"),
     ('producto','certificado'):    ("Conoce nuestro Certificado Financiero:", "Conoce nuestros Certificados Financieros:"),
     ('producto','tarifa'):         ("Estas son nuestras tarifas vigentes:", "Estas son nuestras tarifas vigentes:"),
@@ -101,7 +101,7 @@ _INTROS_MARKETING = {
     ('producto','solicitud'):      ("Así puedes solicitarlo:", "Así puedes solicitarlo:"),
     ('producto','requisito'):      ("Estos son los requisitos:", "Estos son los requisitos:"),
     ('producto','proceso'):        ("Estos son los pasos:", "Estos son los pasos:"),
-    ('servicio','salud'):          ("Te ofrecemos este servicio de salud:", "Nuestros servicios de salud para ti:"),
+    ('servicio','salud'):          ("Te ofrecemos:", "Nuestros servicios sociales para ti:"),
     ('servicio','recreacion'):     ("Disfruta de este beneficio recreativo:", "Disfruta de nuestros beneficios recreativos:"),
     ('servicio','social'):         ("Conoce este programa social:", "Nuestros programas sociales:"),
     ('empresa','identidad'):       ("Sobre nosotros:", "Sobre nosotros:"),
@@ -145,7 +145,14 @@ def formatear_contexto_general(contexto, limite: int = 8) -> Optional[str]:
     for c in contexto[:limite]:
         if not isinstance(c, dict):
             continue
-        nombre = c.get("nombre") or (c.get("subtipo") or "").replace("_", " ").title()
+        raw_nombre = (
+            c.get("nombre") or
+            (c.get("producto") if c.get("subtipo") == "tarifa" else None) or
+            (c.get("valor")   if c.get("subtipo") in ("membresia", "social", "salud", "recreacion") else None) or
+            c.get("subtipo") or
+            ""
+        )
+        nombre = raw_nombre.replace("_", " ").title()
         contenido = (c.get("contenido") or "").strip()
         descripcion = (c.get("descripcion") or "").strip()
 

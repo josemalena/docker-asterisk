@@ -81,7 +81,7 @@
     ]
   },
   "productos": {
-    "header": "Productos y Servicios",
+    "header": "Productos",
     "body": "En Vega Real ofrecemos estos productos para tu bienestar financiero:",
     "button": "Ver productos",
     "sections": [
@@ -90,9 +90,9 @@
         "rows": [
           { "id": "MENU:prestamos",                                              "title": "Préstamos" },
           { "id": "MENU:cuentas",                                                "title": "Cuentas" },
-          { "id": "INTENT:producto|producto/certificado/certificado_financiero", "title": "Certificados" },
+          { "id": "INTENT:producto|producto/certificado/certificado_financiero", "title": "Certificados" },          
+          { "id": "MENU:membresias",                                             "title": "Membresías" },
           { "id": "MENU:tarifas",                                                "title": "Tarifas" },
-          { "id": "MENU:membresias",                                             "title": "Membresía" },
           { "id": "MENU:raiz",                                                   "title": "← Menú principal" }
         ]
       }
@@ -142,8 +142,8 @@
       {
         "title": "Tipos de tarifa",
         "rows": [
-          { "id": "INTENT:producto|producto/tarifa/servicios", "title": "Servicios" },
-          { "id": "INTENT:producto|producto/tarifa/otros",     "title": "Otros" },
+          { "id": "INTENT:producto|producto/tarifa/servicios", "title": "Tarifario de Servicios" },
+          { "id": "INTENT:producto|producto/tarifa/otros",     "title": "Otros Servicios" },
           { "id": "MENU:productos",                            "title": "← Productos" }
         ]
       }
@@ -152,7 +152,7 @@
   "membresias": {
     "header": "Membresía",
     "body": "Tenemos estos tipos de membresía para que formes parte de nuestra cooperativa:",
-    "button": "Ver tipos",
+    "button": "Ver Membresías",
     "sections": [
       {
         "title": "Tipos de membresía",
@@ -169,7 +169,7 @@
   "servicios": {
     "header": "Servicios Sociales",
     "body": "Ofrecemos estos beneficios y servicios sociales para ti y tu familia:",
-    "button": "Ver opciones",
+    "button": "Ver listado",
     "sections": [
       {
         "title": "Servicios",
@@ -180,7 +180,7 @@
           { "id": "INTENT:servicio|servicio/salud/consultorio_medico",  "title": "Consultorio médico" },
           { "id": "INTENT:servicio|servicio/salud/farmacia servicio/salud/odontologia", "title": "Farmacias y clínicas" },
           { "id": "INTENT:servicio|servicio/recreacion/casa_club",      "title": "Casa Club / Recreación" },
-          { "id": "INTENT:servicio|servicio/social/educacion_cooperativa servicio/social/educacion_ecologica", "title": "Educación cooperativa" },
+          { "id": "INTENT:servicio|servicio/social/educacion_cooperativa", "title": "Educación cooperativa" },
           { "id": "MENU:raiz",                                                                  "title": "← Menú principal" }
         ]
       }

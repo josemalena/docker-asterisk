@@ -603,6 +603,53 @@ def obtener_interacciones(canal=None, fecha_desde=None, fecha_hasta=None,
     con.close()
     return columnas, filas, total
 
+def obtener_respuestas_plantilla(desde=None, hasta=None, q=None, pagina=1, por_pagina=50):
+    """Devuelve interacciones WA que son respuesta a una plantilla de otro sistema.
+    Filtra por intencion JSON que contenga intent='respuesta_plantilla'.
+    Retorna (filas, total). Cada fila:
+        (id, fecha_hora, session_id, cod_persona, canal, pregunta, intencion, respuesta)
+    """
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+
+    where = ["canal = 'wa'"]
+    params = []
+    if desde:
+        where.append("fecha_hora >= ?"); params.append(desde)
+    if hasta:
+        where.append("fecha_hora < datetime(?, '+1 day')"); params.append(hasta)
+    if q:
+        like = f"%{q}%"
+        where.append("""
+            (
+                pregunta LIKE ?
+                OR session_id LIKE ?
+                OR intencion LIKE ?
+                OR respuesta LIKE ?
+            )
+        """)
+        params.extend([like, like, like, like])
+    w = " WHERE " + " AND ".join(where)
+
+    cur.execute(f"SELECT COUNT(*) FROM interacciones_chatbot{w}", params)
+    total = cur.fetchone()[0]
+
+    pagina = max(1, int(pagina or 1))
+    por_pagina = max(1, min(500, int(por_pagina or 50)))
+    offset = (pagina - 1) * por_pagina
+
+    cur.execute(
+        f"SELECT id, fecha_hora, session_id, cod_persona, canal, pregunta, intencion, respuesta "
+        f"FROM interacciones_chatbot{w} "
+        f"ORDER BY fecha_hora DESC, id DESC LIMIT ? OFFSET ?",
+        params + [por_pagina, offset]
+    )
+    filas_raw = cur.fetchall()
+    con.close()
+    logg(f" {w}. Filas obtenidas: {total}")
+    return filas_raw, total
+
+
 def guardar_interaccion(session_id, cod_cliente, canal, pregunta, intencion, respuesta):
     intent_source = intencion.get('intent_source') if isinstance(intencion, dict) else None
     intencion_str = json.dumps(intencion, ensure_ascii=False) if isinstance(intencion, dict) else intencion
@@ -968,6 +1015,110 @@ def envia_sms(destino, mensaje):
     except Exception as e:
         print(f"Error enviando SMS: {e}")
         return None
+
+def validar_usuario(usuario, password):
+    sql = ("SELECT 1 "
+          " FROM USUARIOS "
+          " WHERE EST_ACTIVO = 'S' "
+          " AND COD_USUARIO  = UPPER(:usuario) "
+          " AND PALABRA_PASO = ENCRIPTAR(UPPER(:pass)) ")
+    binds = {"usuario": usuario, "pass": password}
+    cursor = connection.cursor()
+    cursor.execute(sql, binds)
+    rows = cursor.fetchmany(1)
+    if rows:
+        return True
+    return False
+
+def nombre_usuario(usuario):
+    sql = ("SELECT NVL(pa.Nombre_clientefj(cod_per_fisica), COD_USUARIO) "
+          " FROM USUARIOS "
+          " WHERE EST_ACTIVO = 'S' "
+          " AND COD_USUARIO  = UPPER(:usuario) "
+          )
+    binds = {"usuario": usuario}
+    cursor = connection.cursor()
+    cursor.execute(sql, binds)
+    rows = cursor.fetchmany(1)
+    if rows:
+        return rows[0][0]
+    return False
+
+def buscar_notificaciones_por_destino(destino, tipo_notificacion=2, limit=5):
+    """Busca en PA.NOTIFICACIONES_CLIENTES notificaciones enviadas al destino.
+
+    Normaliza el número (quita caracteres no numéricos) y consulta la tabla
+    retornando hasta `limit` registros ordenados por fecha más reciente.
+
+    Retorna lista de dicts: {"id": ..., "fecha_envio": ..., "detalle_raw": ..., "detalle": parsed_or_str}
+    """
+    try:
+        digits = re.sub(r"\D", "", str(destino or ""))
+        if not digits:
+            return []
+        candidates = [digits]
+        # si viene con prefijo 1 (ej. 1829...), incluir sin prefijo
+        if digits.startswith('1') and len(digits) == 11:
+            candidates.append(digits[1:])
+        # si viene sin prefijo y tiene 10 dígitos, incluir con 1 delante
+        if len(digits) == 10:
+            candidates.append('1' + digits)
+
+        # eliminar duplicados
+        candidates = list(dict.fromkeys(candidates))
+
+        cursor = connection.cursor()
+        # construir placeholders dinámicos
+        ph = []
+        binds = {}
+        for i, c in enumerate(candidates):
+            key = f"d{i}"
+            ph.append(':' + key)
+            binds[key] = c
+        binds['tipo'] = tipo_notificacion
+
+        sql = ("SELECT id_notificacion, NVL(fecha_adicion, NULL) AS fecha_envio, detalle_estado "
+               "FROM PA.NOTIFICACIONES_CLIENTES "
+               "WHERE destino IN (" + ",".join(ph) + ") "
+               "AND TIPO_NOTIFICACION = :tipo "
+               "ORDER BY fecha_adicion DESC")
+
+        cursor.execute(sql, binds)
+        rows = cursor.fetchmany(limit)
+        out = []
+        for row in rows:
+            _id = row[0]
+            fecha = row[1]
+            detalle_raw = row[2]
+            # Si es LOB, leer
+            try:
+                if hasattr(detalle_raw, 'read'):
+                    detalle_s = detalle_raw.read()
+                else:
+                    detalle_s = detalle_raw
+            except Exception:
+                detalle_s = detalle_raw
+
+            parsed = None
+            try:
+                if isinstance(detalle_s, (bytes, bytearray)):
+                    detalle_s = detalle_s.decode('utf-8', errors='ignore')
+                if isinstance(detalle_s, str) and detalle_s.strip():
+                    parsed = json.loads(detalle_s)
+            except Exception:
+                parsed = None
+
+            out.append({
+                'id': _id,
+                'fecha_envio': fecha.isoformat() if getattr(fecha, 'isoformat', None) else str(fecha),
+                'detalle_raw': detalle_s,
+                'detalle': parsed or detalle_s
+            })
+        logg(f"buscar_notificaciones_por_destino: destino={destino} candidates={candidates} found={len(out)}")
+        return out
+    except Exception as e:
+        loge(f"buscar_notificaciones_por_destino: error buscando notificaciones: {e}")
+        return []
 
 def resumen_agencias(xml_str):
     if not xml_str:

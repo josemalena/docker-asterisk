@@ -1,100 +1,100 @@
-    "codigo_moneda": "DOP",
-    "numero_producto": "106210****9976",
-    "fecha_apertura": "1998-09-30",
-    "estado": "Activa",
-    "saldo_total": 48103.09,
-    "saldo_formateado": "RD$ 48,103.09",
-    "descripcion": "Ahorro Retirable en Pesos Dominicanos",
-    "nombre_asociado": "Jose Alberto"
-  },
-  {
-    "tipo": "producto",
-    "subtipo": "cuenta",
-    "moneda": "RD$",
-    "descripcion_moneda": "Pesos",
-    "codigo_moneda": "DOP",
-    "numero_producto": "106220****0837",
-    "fecha_apertura": "2015-12-04",
-    "estado": "Activa",
-    "saldo_total": 0.0,
-    "saldo_formateado": "RD$ 0.00",
-    "descripcion": "Anticipos a Prestamos",
-    "nombre_asociado": "Jose Alberto"
+empleo: vacantes, vacantes disponibles
+producto: agropecuarios, aportaciones, certificado, certificado financiero, certificados financieros, comercial, consumo, cuenta ahorro retirable, coop san real, cuenta, cuenta ahorro infantil, cuenta ahorros, distrital comunitaria, distrital por agencia, electrodomesticos muebles, feria madre feliz, prestamo hipotecario, hipotecario, hipotecario general, infantil, materiales construccion, membresia, microempresas, motocicletas, nomina electronica, orden pago, otros, otros cargos, paneles solares, prestamo, prestamo feria, prestamo gerencial, prestamos, proceso, requisito, servicios, solicitud, tarifa, tasa, tarjeta debito real, vehiculos nuevos, vehiculos usados, vivienda economica
+servicio: casa club, consultorio medico, educacion cooperativa, educacion ecologica, farmacia, odontologia, plan farmacia, plan funeral, plan odontologico, recreacion, salud, social
+sucursal: sucursal, oficina, provincia, direccion, horario, donde estan, ubicacion, localidad, llega, llego, casa club, cotui, nagua, moca, la vega, macoris, bonao, las canas, sanchez ramirez, ramirez, fantino, angelina, jarabacoa, constanza, espaillat, hermanas mirabal, salcedo, new york
+actividad: actividad, taller, sesion, charla, jornada, celebracion, hora, dia, mes
+saldo: consultar, estado, feria, saldo, tarjeta debito real, cuenta, prestamo, entrega, articulo, pedi, pedido, pedida, pedidos, pedidas, ordene, compre, compraste, entregar, entregaran, entregaron, entregan, entregado, entregada, entregue, entreguen, entregamos, tardaran, tardar, tardara, articulos, comprado, comprada
+saludo: hola, buenos dias, bueno dia, buenas tardes, buena tarde, buenas noches, buena noche, hola como estas, que tal, hola asistente, hola realia, saludos
+[FORMATO]: {"intencion": "categoria", "entidad": "palabra clave", "estado": "OK/ERROR"}
+[REGLAS]:
+- estado = "OK" si la intención está en las categorías, "ERROR" si no
+- entidad = la palabra clave que coincidió (máx 2 palabras) o "" si no aplica
+- Solo español
+[MENSAJE]: "Me interesa un vehículo con facilidades de pago"
+puedes transcribir audio?
+quiero comprar una nevera
+[TAREA]: Clasificar mensaje en una de estas categorías:
+empresa | ayuda | empleo | producto | servicio | sucursal | actividad | saldo | saludo
+[CLAVES POR CATEGORÍA]:
+empresa: asociado, beneficios socio, calidad, contacto, filosofia, fundacion, genero, historia, identidad, mision, nombre, politica, afiliarse, requisitos, estructura, distrito, cooperativa, responsabilidad social, sitio web, telefono, valores, vision
+ayuda: acceso internet banking, afiliacion, asociado, bloqueo tarjeta debito, canal digital, casa club, club bayacanes, piscina, tarjeta, como, feria, puedes, sabes, funciones, ayuda, informa, reclamar, precio, precios, cuesta, cuestan, costo, vale, valen
+empleo: vacantes, vacantes disponibles
+producto: agropecuarios, aportaciones, certificado, certificado financiero, certificados financieros, comercial, consumo, cuenta ahorro retirable, coop san real, cuenta, cuenta ahorro infantil, cuenta ahorros, distrital comunitaria, distrital por agencia, electrodomesticos muebles, feria madre feliz, prestamo hipotecario, hipotecario, hipotecario general, infantil, materiales construccion, membresia, microempresas, motocicletas, nomina electronica, orden pago, otros, otros cargos, paneles solares, prestamo, prestamo feria, prestamo gerencial, prestamos, proceso, requisito, servicios, solicitud, tarifa, tasa, tarjeta debito real, vehiculos nuevos, vehiculos usados, vivienda economica
+servicio: casa club, consultorio medico, educacion cooperativa, educacion ecologica, farmacia, odontologia, plan farmacia, plan funeral, plan odontologico, recreacion, salud, social
+sucursal: sucursal, oficina, provincia, direccion, horario, donde estan, ubicacion, localidad, llega, llego, casa club, cotui, nagua, moca, la vega, macoris, bonao, las canas, sanchez ramirez, ramirez, fantino, angelina, jarabacoa, constanza, espaillat, hermanas mirabal, salcedo, new york
+actividad: actividad, taller, sesion, charla, jornada, celebracion, hora, dia, mes
+saldo: consultar, estado, feria, saldo, tarjeta debito real, cuenta, prestamo, entrega, articulo, pedi, pedido, pedida, pedidos, pedidas, ordene, compre, compraste, entregar, entregaran, entregaron, entregan, entregado, entregada, entregue, entreguen, entregamos, tardaran, tardar, tardara, articulos, comprado, comprada
+saludo: hola, buenos dias, bueno dia, buenas tardes, buena tarde, buenas noches, buena noche, hola como estas, que tal, hola asistente, hola realia, saludos
+[FORMATO]: {"intencion": "categoria", "entidad": "palabra clave", "estado": "OK/ERROR"}
+[REGLAS]:
+- estado = "OK" si la intención está en las categorías, "ERROR" si no
+- entidad = la palabra clave que coincidió (máx 2 palabras) o "" si no aplica
+- Solo español
+[MENSAJE]: "Quiero comprar una nevera"
+/bye
+[TAREA]: Clasificar intención y extraer entidad.
+[CATEGORIAS]: empresa, ayuda, empleo, producto, servicio, sucursal, actividad, saldo, saludo
+[DICCIONARIO]:
+{
+"empresa": ["asociado","beneficios","calidad","contacto","mision","nombre","politica","afiliarse","requisitos","valores","vision"],
+"ayuda": ["acceso internet","bloqueo tarjeta","canal digital","casa club","como","precio","costo","reclamar","funciones"],
+"empleo": ["vacantes"],
+"producto": ["prestamo","cuenta ahorros","certificado","tarjeta debito","vehiculos","hipotecario","vivienda","tasa","solicitud","paneles solares"],
+"servicio": ["farmacia","odontologia","salud","plan funeral","consultorio medico","educacion"],
+"sucursal": ["direccion","horario","ubicacion","cotui","nagua","moca","la vega","bonao"],
+"actividad": ["taller","charla","jornada","celebracion"],
+"saldo": ["consultar","estado","entrega","pedido","entregar","tardar"],
+"saludo": ["hola","buenos dias","buenas tardes","que tal","saludos"]
+}
+[FORMATO_SALIDA]:
+{"intencion": "categoria", "entidad": "palabra_clave", "estado": "OK"}
+[REGLAS]:
+- Si la intencion NO está en las 9 categorias → estado = "ERROR"
+- entidad puede ser "" si no aplica
+- Solo responde con el JSON, sin texto adicional
+[EJEMPLOS]:
+User: "¿cómo me afilio?"
+Bot: {"intencion": "empresa", "entidad": "afiliarse", "estado": "OK"}
+User: "¿qué hora es?"
+Bot: {"intencion": "", "entidad": "", "estado": "ERROR"}
+[MENSAJE]: "Quiero comprar una nevera"
+/show parameters
+/set parameter temperature 0.0
+/set parameter top_p 0.9
+/set parameter top_k 20
+/set parameter num_predict 100
+/set parameter top_p 0.9
+/set parameter top_k 20
+/set parameter num_predict 100
+/show parameters
+/bye
+cuales son los requisitos para afiliarse
+/bye
+cuales son los requisitos para afiliarse
+/bye
+cuales son los requisitos para afiliarse
+cuales son los requisitos para afiliarse
+cuales son los requisitos para afiliarse
+/bye
+Me falta una mesa por favor quiero explicación
+cual es requisito para afiliarse?
+Me falta una mesa por favor quiero explicación
+/quit
+/bye
+Me falta una mesa por favor quiero explicación
+Me falta el televisor por favor quiero explicación
+/bye
+Me falta el televisor por favor quiero explicación
+Me faltan la nevera y la estufa quiero una explicación
+como me afilio?
+que actividad hay en la feria?
+/bye
+{
+  "pregunta": "me falta una mesa por favor quiero explicación",
+  "intencion": "producto",
+  "entidad": "articulo_feria",
+  "datos": {
+    "contenido": "Los precios de los artículos disponibles en la Expo Feria Madre Feliz cambian según marca, modelo y capacidad. Consulta el catálogo actualizado con todos los precios en nuestra página oficial."
   }
-]
-```
-[CONOCIMIENTO_EXTRA]:
-[REGLAS ADICIONALES]:
-- Utiliza el idioma español neutro con enfoque en República Dominicana.
-- Sé claro, profesional, empático y amigable en el tono.
-[FECHA_ACTUAL]:
-2026-05-12T13:44:30.814767
-[PREGUNTA]:
-Quiwro ver el balance de mis cuentas
-[CONVERSACION_PREVIA]:
-[{"role": "usuario", "content": "Mi nombre es franklin", "timestamp": 1778604887}, {"role": "asistente", "content": "Error al conectar con OpenAI: 404 Client Error: Not Found for url: http://ollama:11434/api/generate/v1/chat/completions", "timestamp": 1778604887}, {"role": "usuario", "content": "Soy socio hace m\u00e1s de 15 a\u00f1os o 20 a\u00f1os quiero si es posible tener el n\u00famero de WhatsApp de la sucursal De Salcedo", "timestamp": 1778604983}, {"role": "asistente", "content": "Error al conectar con OpenAI: 404 Client Error: Not Found for url: http://ollama:11434/api/generate/v1/chat/completions", "timestamp": 1778604983}, {"role": "usuario", "content": "Pr\u00e9stamo de feria para veh\u00edculos nuevos", "timestamp": 1778605138}, {"role": "asistente", "content": "*Veh\u00edculos Nuevos*\nTener el 10% del total a financiar en la cuenta de aportaciones. Tasa: desde 14% hasta 15%. Plazo: Hasta 5 a\u00f1os. Financiamiento: Hasta 80%.", "timestamp": 1778605138}, {"role": "usuario", "content": "Ok", "timestamp": 1778605169}, {"role": "asistente", "content": "Ha sido un placer haberte servido. Si tienes m\u00e1s dudas, puedes contactarme cuando gustes.", "timestamp": 1778605169}]
-[DATOS_JSON]:
-```json
-[{'tipo': 'sucursal', 'subtipo': 'direccion', 'valor': 'salcedo', 'nombre': 'Salcedo', 'contenido': 'Oficina de Servicios: Salcedo', 'direccion': 'Calle Francisca R. Mollins #98, Centro Del Pueblo', 'municipio': 'Salcedo', 'provincia': 'Hermanas Mirabal', 'pais': 'República Dominicana', 'telefonos': ['809-577-2301'], 'extensiones': ['4001', '4002', '4003'], 'horario': ['Lunes a Viernes de 8:00am a 5:00pm', 'Sábados de 8:00am a 12:00pm', 'Domingos Cerrado']}, {'tipo': 'sucursal', 'subtipo': 'direccion', 'valor': 'salcedo', 'nombre': 'Salcedo', 'contenido': 'Oficina de Servicios: Salcedo', 'direccion': 'Calle Francisca R. Mollins #98, Centro Del Pueblo', 'municipio': 'Salcedo', 'provincia': 'Hermanas Mirabal', 'pais': 'República Dominicana', 'telefonos': ['809-577-2301'], 'extensiones': ['4001', '4002', '4003'], 'horario': ['Lunes a Viernes de 8:00am a 5:00pm', 'Sábados de 8:00am a 12:00pm', 'Domingos Cerrado']}]
-```
-[CONOCIMIENTO_EXTRA]:
-[REGLAS ADICIONALES]:
-- Utiliza el idioma español neutro con enfoque en República Dominicana.
-- Sé claro, profesional, empático y amigable en el tono.
-[FECHA_ACTUAL]:
-2026-05-12T13:00:51.777801
-[PREGUNTA]:
-Quiero hablar con una persona de la sucursal salcedo
-=========FIN PROMPT==========
-[DATOS_JSON]:
-```json
-[
-  {
-    "tipo": "producto",
-    "subtipo": "cuenta",
-    "moneda": "RD$",
-    "descripcion_moneda": "Pesos",
-    "codigo_moneda": "DOP",
-    "numero_producto": "806010****0023",
-    "fecha_apertura": "1998-12-28",
-    "estado": "Activa",
-    "saldo_total": 2134545.37,
-    "saldo_formateado": "RD$ 2,134,545.37",
-    "descripcion": "Aportaciones en Pesos Dominicanos",
-    "nombre_asociado": "Jose Alberto"
-  },
-  {
-    "tipo": "producto",
-    "subtipo": "cuenta",
-    "moneda": "RD$",
-    "descripcion_moneda": "Pesos",
-    "codigo_moneda": "DOP",
-    "numero_producto": "106210****9976",
-    "fecha_apertura": "1998-09-30",
-    "estado": "Activa",
-    "saldo_total": 48103.09,
-    "saldo_formateado": "RD$ 48,103.09",
-    "descripcion": "Ahorro Retirable en Pesos Dominicanos",
-    "nombre_asociado": "Jose Alberto"
-  },
-  {
-    "tipo": "producto",
-    "subtipo": "cuenta",
-    "moneda": "RD$",
-    "descripcion_moneda": "Pesos",
-    "codigo_moneda": "DOP",
-    "numero_producto": "106220****0837",
-    "fecha_apertura": "2015-12-04",
-    "estado": "Activa",
-    "saldo_total": 0.0,
-    "saldo_formateado": "RD$ 0.00",
-    "descripcion": "Anticipos a Prestamos",
-    "nombre_asociado": "Jose Alberto"
-  }
-]
-```
-[FECHA_ACTUAL]:
-2026-05-12T13:44:30.814767
-[PREGUNTA]:
-Quiwro ver el balance de mis cuentas
+}
 /bye

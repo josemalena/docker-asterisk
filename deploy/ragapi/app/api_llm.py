@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from random import randint
 
 # Base de datos
-from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_sesion, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula
+from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_sesion, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario
 
 # Menú interactivo WhatsApp
 import menu
@@ -198,6 +198,177 @@ def vapid_public_key():
     logg(f"Enviando VAPID_PUBLIC_KEY a {session_id}")
     return jsonify({"publicKey": VAPID_PUBLIC_KEY})
 
+def _reenviar_plantilla_zenvia(numero, templateId, fields):
+    """Reenvía una plantilla Zenvia al número dado usando el mismo templateId y fields originales."""
+    try:
+        payload = {
+            "externalId": "realia",
+            "from": ZENVIA_WANUMBER,
+            "to": numero,
+            "contents": [{
+                "type": "template",
+                "templateId": templateId,
+                "fields": fields
+            }]
+        }
+        response = requests.post(ZENVIA_API, json=payload, headers=ZENVIA_HEADERS, verify=False)
+        if response.status_code not in (200, 201):
+            loge(f"_reenviar_plantilla_zenvia: error {response.status_code}: {response.text}")
+        else:
+            logg(f"_reenviar_plantilla_zenvia: plantilla '{templateId}' reenviada a {numero}")
+    except Exception as e:
+        loge(f"_reenviar_plantilla_zenvia: excepción: {e}")
+
+
+def _manejar_respuesta_plantilla(numero, mensaje, message_id):
+    """Detecta si el mensaje entrante de WA es la respuesta a una notificación de plantilla
+    enviada por otro sistema (gobernanza, encuestas, etc.) y responde automáticamente.
+
+    Flujo:
+      1. Si hay un flujo activo de validación → no interceptar.
+      2. Si ya respondimos antes a la plantilla de este número → no interceptar.
+      3. Buscar en Redis el caché de la notificación (last_templateId / last_fields).
+         Si no está, consultar Oracle via buscar_notificaciones_por_destino.
+      4. Con los fields encontrados:
+         - Si existe 'url' → responder con el enlace personalizado.
+         - Si no existe 'url' → agradecer y reenviar la plantilla.
+      5. Marcar 'template_replied' para no repetir en mensajes siguientes.
+      6. Marcar 'menu_mostrado' para que el flujo normal no imponga el menú.
+
+    Retorna True si el mensaje fue interceptado (no debe pasar a procesar).
+    """
+    try:
+        # 1. No interceptar si hay flujo activo de validación/OTP
+        estado = redisdb.get_variable(numero, "estado_validacion")
+        if estado:
+            logg(f"_manejar_respuesta_plantilla: estado_validacion activo ({estado}), omitiendo")
+            return False
+
+        rdb = redisdb.getRedis()
+
+        # 2. No interceptar si ya respondimos antes
+        ya_respondido = rdb.hget(f"wa_orig:{numero}", "template_replied")
+        if ya_respondido and ya_respondido.decode() == "1":
+            logg(f"_manejar_respuesta_plantilla: plantilla ya atendida para {numero}")
+            return False
+
+        # 3a. Intentar leer del caché en Redis
+        templateId = None
+        fields = None
+        outgoing_msg_id = None
+
+        fields_b = rdb.hget(f"wa_orig:{numero}", "last_fields")
+        templateId_b = rdb.hget(f"wa_orig:{numero}", "last_templateId")
+        outgoing_id_b = rdb.hget(f"wa_orig:{numero}", "last_notificacion_id")
+
+        try:
+            if fields_b:
+                fields = json.loads(fields_b.decode())
+            if templateId_b:
+                templateId = json.loads(templateId_b.decode())
+            if outgoing_id_b:
+                outgoing_msg_id = outgoing_id_b.decode()
+        except Exception as e:
+            loge(f"_manejar_respuesta_plantilla: error leyendo Redis caché: {e}")
+            fields = None
+            templateId = None
+
+        # 3b. Si no hay caché, consultar Oracle
+        if not fields:
+            logg(f"_manejar_respuesta_plantilla: sin caché, consultando Oracle para {numero}")
+            matches = buscar_notificaciones_por_destino(numero, tipo_notificacion=2, limit=1)
+            if not matches:
+                logg(f"_manejar_respuesta_plantilla: no hay notificaciones para {numero}")
+                return False
+            m = matches[0]
+            detalle = m.get('detalle')
+            if not isinstance(detalle, dict):
+                return False
+            # Extraer id del mensaje saliente (campo raíz del JSON)
+            outgoing_msg_id = str(detalle.get('id') or m.get('id') or '')
+            contents_out = detalle.get('contents')
+            if not isinstance(contents_out, list) or not contents_out:
+                return False
+            first = contents_out[0]
+            templateId = first.get('templateId') or first.get('templateID')
+            fields = first.get('fields')
+            if not fields:
+                logg(f"_manejar_respuesta_plantilla: notificación sin fields para {numero}")
+                return False
+            # Cachear en Redis (24h)
+            try:
+                rdb.hset(f"wa_orig:{numero}", "last_templateId", json.dumps(templateId, ensure_ascii=False))
+                rdb.hset(f"wa_orig:{numero}", "last_fields", json.dumps(fields, ensure_ascii=False))
+                rdb.hset(f"wa_orig:{numero}", "last_notificacion_id", outgoing_msg_id)
+                rdb.expire(f"wa_orig:{numero}", 86400)
+            except Exception as e:
+                loge(f"_manejar_respuesta_plantilla: error cacheando en Redis: {e}")
+
+        if not fields:
+            return False
+
+        # 4. Construir respuesta según presencia de URL
+        nombre = fields.get('nombre', '')
+        # Buscar URL en distintos nombres de campo habituales
+        url = (fields.get('url') or fields.get('link') or
+               fields.get('enlace') or fields.get('URL') or '')
+        # Descripción del motivo/evento (primer campo descriptivo que encontremos)
+        descripcion = (fields.get('nombre_evento') or fields.get('consejos') or
+                       fields.get('accion') or fields.get('asunto') or '')
+
+        saludo = f"Hola *{nombre}*! 👋\n" if nombre else ""
+
+        if url:
+            partes = [saludo.rstrip()]
+            if descripcion:
+                partes.append(f"Recibimos tu respuesta sobre *{descripcion}*.")
+                partes.append(f"Puedes acceder o confirmar tu participación con el siguiente enlace:\n{url}")
+            else:
+                partes.append(f"Puedes completar la encuesta de satisfacción con el siguiente enlace:\n{url}")
+            partes.append("\nSi necesitas más información, escribe *menu* para ver las opciones disponibles.")
+            respuesta = "\n".join(p for p in partes if p)
+        else:
+            partes = [saludo.rstrip()]
+            if descripcion:
+                partes.append(f"Gracias por tu respuesta sobre *{descripcion}*.")
+            else:
+                partes.append("Gracias por tu respuesta.")
+            partes.append("Te reenviamos la información para que la tengas a mano.")
+            respuesta = "\n".join(p for p in partes if p)
+
+        logg(f"_manejar_respuesta_plantilla: respondiendo a {numero} | templateId={templateId} | url={url}")
+        enviar_respuesta_wa(message_id, numero, respuesta)
+
+        # Si no hay URL, reenviar la plantilla original
+        if not url and templateId and fields:
+            _reenviar_plantilla_zenvia(numero, templateId, fields)
+
+        # 5. Marcar como atendido y activar menu_mostrado para flujo posterior normal
+        try:
+            rdb.hset(f"wa_orig:{numero}", "template_replied", "1")
+            redisdb.set_variable(numero, "menu_mostrado", "1")
+        except Exception as e:
+            loge(f"_manejar_respuesta_plantilla: error marcando estado: {e}")
+
+        # 6. Persistir la interacción en SQLite (incluir fields para no re-consultar Oracle)
+        try:
+            guardar_interaccion(
+                numero, 0, "wa", mensaje,
+                {"intent": "respuesta_plantilla", "type": "template",
+                 "templateId": templateId, "outgoing_msg_id": outgoing_msg_id,
+                 "fields": fields},
+                respuesta
+            )
+        except Exception as e:
+            loge(f"_manejar_respuesta_plantilla: error guardando interacción: {e}")
+
+        return True
+
+    except Exception as e:
+        loge(f"_manejar_respuesta_plantilla: error inesperado: {e}")
+        return False
+
+
 @app.route('/webhook/zenvia', methods=['POST', 'GET'])
 def zenvia_webhook():
     client_info = getClientInfo(request)
@@ -258,12 +429,16 @@ def zenvia_webhook():
     session["last_processed_msg"] = message_id
     
     logg(f"zenvia_webhook: Procesando: {numero}: {mensaje}")
-    # 6. Lógica de negocio        
+
+    # 6. Si el mensaje es respuesta a una plantilla enviada por otro sistema, interceptar
+    if _manejar_respuesta_plantilla(numero, mensaje, message_id):
+        return jsonify({"status": "template_reply_handled"}), 200
+
+    # 7. Lógica de negocio normal
     Thread(target=procesar, args=(numero, mensaje, payload, "wa", message_id)).start()
 
-    # 7. Respuesta inmediata para evitar timeout
+    # 8. Respuesta inmediata para evitar timeout
     return jsonify({"status": "processing"}), 200
-    #return jsonify({"status": "ok"}), 200
 
 @app.route("/webchat/mensajes")
 def mensajes_webchat():
@@ -2033,7 +2208,10 @@ consulta_html = """
 <body>
   <div class="topbar">
     <h1>Real[IA] · Interacciones</h1>
-    <span>Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a></span>
+    <span>
+      <a href="{{ url_for('respuestas_plantilla') }}" style="margin-right:.75rem;">Respuestas de Clientes</a>
+      Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a>
+    </span>
   </div>
   <div class="container">
     <form method="GET" class="card">
@@ -2238,16 +2416,266 @@ def _require_login():
         return redirect(url_for('login'))
     return None
 
+# ─── Template: Respuestas de Plantillas ────────────────────────────────────
+plantillas_html = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Respuestas de Plantillas · Real[IA]</title>
+  <style>{{ css|safe }}
+    .badge { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; font-weight:600; }
+    .badge.con-url  { background:#dcfce7; color:#166534; }
+    .badge.sin-url  { background:#fef3c7; color:#92400e; }
+    table td { vertical-align:middle; }
+    td.nombre   { font-weight:600; font-size:.87rem; }
+    td.desc     { max-width:200px; font-size:.8rem; color:var(--muted); }
+    td.msg      { max-width:180px; font-size:.8rem; font-style:italic; white-space:pre-wrap; word-break:break-word; }
+    td.tel      { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.82rem; }
+    td.tmpl     { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.7rem; color:var(--muted);
+                  max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .info-banner { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:.65rem 1rem;
+                   font-size:.87rem; color:#1e40af; margin-bottom:1rem; }
+    details.fd summary { cursor:pointer; color:var(--pri2); font-size:.75rem; }
+    details.fd pre { background:#f7f8fa; border:1px solid var(--border); border-radius:6px;
+                     padding:.4rem .55rem; margin:.25rem 0 0; font-size:.72rem;
+                     font-family:ui-monospace,Menlo,Consolas,monospace;
+                     max-height:160px; overflow:auto; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>Real[IA] · Respuestas de Plantillas</h1>
+    <span>
+      <a href="{{ url_for('interacciones') }}" style="margin-right:.75rem;">← Interacciones</a>
+      Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a>
+    </span>
+  </div>
+  <div class="container">
+    <div class="info-banner">      
+    </div>
+    <form method="GET" class="card">
+      <div class="filtros">
+        <div><label>Desde</label><input type="date" name="desde" value="{{ filtros.desde or '' }}"></div>
+        <div><label>Hasta</label><input type="date" name="hasta" value="{{ filtros.hasta or '' }}"></div>
+        <div>
+          <label>Buscar (teléfono o mensaje)</label>
+          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Número o texto…">
+        </div>
+        <div>
+          <label>Por página</label>
+          <select name="pp">
+            {% for n in [25, 50, 100, 200] %}
+            <option value="{{ n }}" {% if filtros.por_pagina == n %}selected{% endif %}>{{ n }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="grid-column:span 2; display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
+          <button class="btn" type="submit">Filtrar</button>
+          <a class="btn secondary" href="{{ url_for('respuestas_plantilla') }}">Limpiar</a>
+          <a class="btn secondary"
+             href="{{ url_for('respuestas_plantilla_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or ''}) }}">
+            ⬇ Exportar CSV
+          </a>
+        </div>
+      </div>
+    </form>
+    <div class="stats">
+      <div class="stat"><span class="num">{{ total }}</span><span class="lbl">respuestas totales</span></div>
+      <div class="stat"><span class="num">{{ stats.con_url }}</span><span class="lbl">con enlace URL</span></div>
+      <div class="stat"><span class="num">{{ stats.sin_url }}</span><span class="lbl">sin URL (reenviadas)</span></div>
+    </div>
+    <div class="meta">Mostrando {{ desde_idx }}–{{ hasta_idx }} de {{ total }} registros.</div>
+    <div class="card" style="padding:0; overflow-x:auto;">
+      {% if filas %}
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha recibido</th>
+            <th>Teléfono</th>
+            <th>Nombre</th>
+            <th>Evento / Descripción</th>
+            <th>Enlace</th>
+            <th>Mensaje del cliente</th>
+            <th>Template ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in filas %}
+          <tr>
+            <td style="white-space:nowrap; font-size:.82rem;">{{ r.fecha }}</td>
+            <td class="tel">{{ r.telefono }}</td>
+            <td class="nombre">{{ r.nombre or '—' }}</td>
+            <td class="desc">
+              {{ r.descripcion or '—' }}
+              {% if r.fields_json %}
+              <details class="fd"><summary>Ver todos los campos</summary><pre>{{ r.fields_json }}</pre></details>
+              {% endif %}
+            </td>
+            <td>
+              {% if r.url %}
+                <a class="url-link" href="{{ r.url }}" target="_blank" rel="noopener"
+                   style="color:var(--pri2);text-decoration:none;font-size:.8rem;word-break:break-all;">
+                  {{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}
+                </a>
+                <span class="badge con-url" style="display:block;margin-top:.2rem;">✓ URL disponible</span>
+              {% else %}
+                <span class="badge sin-url">Sin URL — plantilla reenviada</span>
+              {% endif %}
+            </td>
+            <td class="msg">{{ r.mensaje }}</td>
+            <td class="tmpl" title="{{ r.template_id }}">
+              {{ r.template_id[:20] if r.template_id else '—' }}{% if r.template_id and r.template_id|length > 20 %}…{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">No hay respuestas con esos filtros.</div>
+      {% endif %}
+    </div>
+    {% if total_paginas > 1 %}
+    <div class="pager">
+      {% if pagina > 1 %}
+        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina-1}) }}">← Anterior</a>
+      {% endif %}
+      <span class="actual">Página {{ pagina }} de {{ total_paginas }}</span>
+      {% if pagina < total_paginas %}
+        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina+1}) }}">Siguiente →</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>
+"""
+
+
+def _parse_plantilla_row(r):
+    """Parsea una fila de obtener_respuestas_plantilla a dict listo para la vista.
+    r: (id, fecha_hora, session_id, cod_persona, canal, pregunta, intencion, respuesta)
+    """
+    intent_data = {}
+    id = 0
+    try:
+        numero = r[2]
+        logg(f"_manejar_respuesta_plantilla: sin caché, consultando Oracle para {numero}")
+        matches = buscar_notificaciones_por_destino(numero, tipo_notificacion=2, limit=1)
+        if not matches:
+            return {}
+        m = matches[0]
+        detalle = m.get('detalle')        
+        id = detalle.get('id')
+        intent_data = detalle.get('contents')[0]
+        #logg(f"intent_data: {json.dumps(intent_data, ensure_ascii=False, indent=2)}")
+        
+    except (TypeError, ValueError):
+        pass
+    
+    fields = intent_data.get('fields') or {}
+    url = (fields.get('url') or fields.get('link') or
+           fields.get('enlace') or fields.get('URL') or '')
+    nombre = fields.get('nombre', '')
+    descripcion = (fields.get('nombre_evento') or fields.get('consejos') or
+                   fields.get('accion') or fields.get('asunto') or '')
+    return {
+        'id': r[0],
+        'fecha': _fmt_ast(r[1]),
+        'telefono': r[2],
+        'nombre': nombre,
+        'descripcion': descripcion,
+        'url': url,
+        'mensaje': r[5],
+        'template_id': intent_data.get('templateId') or '',
+        'outgoing_msg_id': intent_data.get('outgoing_msg_id') or '',
+        'fields_json': json.dumps(fields, ensure_ascii=False, indent=2) if fields else '',
+    }
+
+
+@app.route('/respuestas-plantilla')
+def respuestas_plantilla():
+    if (resp := _require_login()) is not None:
+        return resp
+    f = _filtros_request(request)
+    try:
+        pagina = max(1, int(request.args.get('p', 1)))
+    except ValueError:
+        pagina = 1
+    try:
+        por_pagina = int(request.args.get('pp', 50))
+    except ValueError:
+        por_pagina = 50
+
+    filas_raw, total = obtener_respuestas_plantilla(
+        desde=f['desde'], hasta=f['hasta'], q=f['q'],
+        pagina=pagina, por_pagina=por_pagina,
+    )
+    filas = [_parse_plantilla_row(r) for r in filas_raw]
+    con_url = 0# sum(1 for r in filas if r['url'])
+    sin_url = len(filas) - con_url
+
+    total_paginas = max(1, (total + por_pagina - 1) // por_pagina)
+    desde_idx = 0 if total == 0 else (pagina - 1) * por_pagina + 1
+    hasta_idx = min(total, pagina * por_pagina)
+
+    return render_template_string(
+        plantillas_html, css=_BASE_CSS,
+        usuario=session.get('usuario'),
+        filas=filas, total=total,
+        stats={'con_url': con_url, 'sin_url': sin_url},
+        total_paginas=total_paginas,
+        pagina=pagina, desde_idx=desde_idx, hasta_idx=hasta_idx,
+        filtros={**f, 'por_pagina': por_pagina},
+    )
+
+
+@app.route('/respuestas-plantilla/csv')
+def respuestas_plantilla_csv():
+    if (resp := _require_login()) is not None:
+        return resp
+    f = _filtros_request(request)
+    filas_raw, _total = obtener_respuestas_plantilla(
+        desde=f['desde'], hasta=f['hasta'], q=f['q'],
+        pagina=1, por_pagina=50000,
+    )
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        'fecha_recibido', 'telefono', 'nombre', 'descripcion',
+        'url', 'mensaje_cliente', 'templateId', 'outgoing_msg_id', 'fields_completo',
+    ])
+    for r in filas_raw:
+        d = _parse_plantilla_row(r)
+        w.writerow([
+            d['fecha'], d['telefono'], d['nombre'], d['descripcion'],
+            d['url'], d['mensaje'], d['template_id'], d['outgoing_msg_id'], d['fields_json'],
+        ])
+    out = buf.getvalue()
+    fname = f"respuestas_plantilla_{f['desde']}_{f['hasta']}.csv"
+    return app.response_class(
+        out, mimetype='text/csv; charset=utf-8',
+        headers={'Content-Disposition': f'attachment; filename="{fname}"'}
+    )
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         usuario = request.form.get('usuario', '').strip()
         password = request.form.get('password', '')
+        valido = False
         if (ADMIN_USER and ADMIN_PASSWORD_HASH
                 and usuario == ADMIN_USER
                 and check_password_hash(ADMIN_PASSWORD_HASH, password)):
+                valido = True
+        else:
+            valido = validar_usuario(usuario, password)
+
+        if valido:
             session['usuario'] = usuario
             return redirect(url_for('interacciones'))
+        
         flash('Credenciales incorrectas')
     return render_template_string(login_html, css=_BASE_CSS)
 
