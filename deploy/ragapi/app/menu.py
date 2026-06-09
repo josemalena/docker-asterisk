@@ -15,7 +15,7 @@ import json
 import os
 from typing import Optional, Tuple
 
-MENUS_PATH = os.path.join(os.path.dirname(__file__), "menus.json")
+MENUS_PATH = os.path.join(os.path.dirname(__file__),"json", "menus.json")
 _menus_cache = None
 _menus_mtime = 0.0
 

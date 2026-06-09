@@ -1,4 +1,5 @@
 #!/opt/rag/bin/python
+#api_llm.py: Lógica de negocio principal, manejo de rutas y procesamiento de mensajes para la aplicación RAG API.
 import requests
 import uuid
 import time
@@ -10,7 +11,7 @@ import urllib3
 import hashlib
 #from openai import OpenAI
 from typing import Dict, List, Optional
-from flask import Flask, request, jsonify, send_from_directory, session, request, redirect, url_for, render_template_string, flash, abort
+from flask import Flask, request, jsonify, send_from_directory, session, request, redirect, url_for, render_template, render_template_string, flash, abort
 from flask_session import Session
 from pywebpush import webpush, WebPushException
 from threading import Thread
@@ -18,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from random import randint
 
 # Base de datos
-from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_conversacion, obtener_conversacion_header, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario, guardar_mensaje
+from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_conversacion, obtener_conversacion_header, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario, guardar_mensaje, nombre_usuario, marcar_atendido_por, obtener_atendido_por, cerrar_conversacion, transferir_conversacion, guardar_nota_interna, guardar_cliente
 
 # Menú interactivo WhatsApp
 import menu
@@ -301,6 +302,10 @@ def _manejar_respuesta_plantilla(numero, mensaje, message_id, detalle=None):
                 rdb.hset(f"wa_orig:{numero}", "last_fields", json.dumps(fields, ensure_ascii=False))
                 rdb.hset(f"wa_orig:{numero}", "last_notificacion_id", outgoing_msg_id)
                 rdb.expire(f"wa_orig:{numero}", 86400)
+                redisdb.set_variable(numero, "templateId", json.dumps(templateId, ensure_ascii=False))
+                guardar_cliente(numero)
+                logg(f"_manejar_respuesta_plantilla: caché actualizado en Redis para {numero} | templateId={templateId}")
+                
             except Exception as e:
                 loge(f"_manejar_respuesta_plantilla: error cacheando en Redis: {e}")
 
@@ -357,7 +362,7 @@ def _manejar_respuesta_plantilla(numero, mensaje, message_id, detalle=None):
                 {"intent": "respuesta_plantilla", "type": "template",
                  "templateId": templateId, "outgoing_msg_id": outgoing_msg_id,
                  "fields": fields},
-                respuesta, detalle
+                respuesta
             )
         except Exception as e:
             loge(f"_manejar_respuesta_plantilla: error guardando interacción: {e}")
@@ -405,7 +410,7 @@ def zenvia_webhook():
             direccion="IN",
             contenido=mensaje or payload,
             enviado_por=nombre_remitente,
-            metadata=data
+            metadata=json.dumps(data)
         )
     except (KeyError, IndexError):
         return jsonify({"status": "invalid_format"}), 400
@@ -474,7 +479,7 @@ def web_chat():
         canal="wc",
         direccion="IN",
         contenido=mensaje or payload,
-        metadata=data
+        metadata=json.dumps(data)
     )
     logg(f"web_chat: session_id: '{session_id}'")
     message_id = str(uuid.uuid4())
@@ -497,6 +502,19 @@ def procesar(numero, mensaje, payload, canal, message_id):
         estado = redisdb.get_variable(numero, "estado_validacion")
         logg(f"procesar: estado_validacion '{estado}'")
         mensaje_original = mensaje.strip()
+
+        # --- Atención humana (handoff) ---
+        # Si un agente tomó la conversación (atendido_por=humano), el bot queda en
+        # SILENCIO total: no responde menú ni LLM. La única excepción es el flujo de
+        # validación que el propio agente disparó (esperando_cedula/telefono/otp),
+        # para que cédula/OTP/SMS sigan funcionando sin duplicar lógica. El mensaje
+        # entrante ya fue persistido por el webhook/web_chat, así que el panel del
+        # agente lo verá al refrescar.
+        atendido = redisdb.get_variable(numero, "atendido_por")
+        en_validacion = estado in (b"esperando_cedula", b"esperando_telefono", b"esperando_otp")
+        if atendido == b"humano" and not en_validacion:
+            logg(f"procesar: conversación atendida por humano, bot en silencio (estado={estado})")
+            return
 
         # --- Menú interactivo (WhatsApp y webchat) ---
         if canal in ("wa", "wc"):
@@ -652,8 +670,9 @@ def procesar(numero, mensaje, payload, canal, message_id):
                             saludo = "Bienvenido"
                         if sexo == "F":
                             saludo = "Bienvenida"
-                        redisdb.set_variable(numero, "cod_persona", cod_persona)
+                        redisdb.set_variable(numero, "cod_persona", cod_persona)                        
                         redisdb.set_variable(numero, "nombres", row["nombres"])
+                        guardar_cliente(numero)
                         # Verificar si hay múltiples teléfonos registrados
                         telefonos = _parsear_telefonos(celular)
                         if len(telefonos) > 1:
@@ -700,7 +719,7 @@ def procesar(numero, mensaje, payload, canal, message_id):
                 telefonos_b = redisdb.get_variable(numero, "telefonos_otp")
                 nombres_b = redisdb.get_variable(numero, "nombres")
                 saludo_b = redisdb.get_variable(numero, "saludo_otp")
-                cod_persona_b = redisdb.get_variable(numero, "cod_persona")
+                cod_persona_b = redisdb.get_variable(numero, "cod_persona")                
                 if not telefonos_b or not cod_persona_b:
                     limpiar_estado_validacion(numero)
                     enviar_respuesta(canal, message_id, numero,
@@ -765,6 +784,17 @@ def procesar(numero, mensaje, payload, canal, message_id):
                     message_id = redisdb.get_variable(numero, "message_id").decode()
                     redisdb.set_variable(numero, "estado_validacion", "validado")
                     redisdb.del_variable(numero, "otp")
+                    # FASE 7: si la conversación está atendida por un humano, NO se
+                    # ejecuta la intención original. Sólo se marca al cliente como
+                    # validado y se notifica (el panel del agente lo refleja al
+                    # refrescar /conversacion, que expone estado_validacion).
+                    if redisdb.get_variable(numero, "atendido_por") == b"humano":
+                        redisdb.set_variable(numero, "cliente_validado", "1")
+                        cod_persona = (redisdb.get_variable(numero, "cod_persona") or b"").decode()
+                        respuesta = "¡Validación exitosa!"
+                        enviar_respuesta(canal, message_id, numero, respuesta)
+                        guardar_interaccion(numero, cod_persona, canal, mensaje, None, respuesta)
+                        return
                     respuesta = "Validación exitosa. Procesando tu solicitud..."
                     enviar_respuesta(canal, message_id, numero, respuesta)
                     # Ejecutar la intención original
@@ -913,7 +943,7 @@ def notify(session_id, body):
         loge(f"Error general en envío de notificación push: {e}")   
 
 def enviar_respuesta(canal, message_id, numero, respuesta):
-    logg(f"enviar_respuesta:- canal: '{canal}', message_id: '{message_id}', numero: '{numero}',\n- respuesta: '{respuesta}'")
+    logg(f"enviar_respuesta:- canal: '{canal}', message_id: '{message_id}', numero: '{numero}'")
     guardar_mensaje(
         session_id=message_id,
         telefono=numero,
@@ -1681,7 +1711,7 @@ _file_cache = {}  # full_path -> (mtime, data)
 
 
 def _cached_read(filepath, parser):
-    full_path = f"{BASE_PATH}/{filepath}"
+    full_path = f"{filepath}"
     try:
         mtime = os.path.getmtime(full_path)
     except OSError:
@@ -1715,11 +1745,13 @@ def _parse_jsonl(path):
 
 
 def load_json_from_file(filepath) -> dict:
-    return _cached_read(filepath, _parse_json)
+    json_path = os.path.join(BASE_PATH, "json", filepath)
+    return _cached_read(json_path, _parse_json)
 
 
 def load_jsonl_from_file(filepath) -> dict:
-    return _cached_read(filepath, _parse_jsonl)
+    jsonl_path = os.path.join(BASE_PATH, "json", filepath)
+    return _cached_read(jsonl_path, _parse_jsonl)
 
 def detect_intent2(query: str) -> str:
     """Detecta la intención principal del usuario"""
@@ -2047,645 +2079,12 @@ def _label_cliente(v):
         return 'Cliente N/D'
     return f'Cliente {v}'
 
-_BASE_CSS = """
-:root { --bg:#f5f6f8; --card:#ffffff; --ink:#1f2937; --muted:#6b7280;
-        --pri:#1e3a8a; --pri2:#2563eb; --border:#e5e7eb; --row:#fafafa; }
-* { box-sizing:border-box; }
-body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-       background:var(--bg); color:var(--ink); }
-.topbar { background:var(--pri); color:#fff; padding:.75rem 1rem; display:flex;
-          justify-content:space-between; align-items:center; }
-.topbar h1 { margin:0; font-size:1.05rem; font-weight:600; }
-.topbar a { color:#fff; text-decoration:none; opacity:.9; font-size:.9rem; }
-.topbar a:hover { opacity:1; text-decoration:underline; }
-.container { padding:1rem; }
-.card { background:var(--card); border:1px solid var(--border); border-radius:8px;
-        padding:1rem; margin-bottom:1rem; }
-.filtros { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-           gap:.75rem; align-items:end; }
-.filtros label { display:block; font-size:.8rem; color:var(--muted); margin-bottom:.25rem; }
-.filtros input, .filtros select { width:100%; padding:.45rem .5rem; border:1px solid var(--border);
-                                  border-radius:6px; font-size:.9rem; background:#fff; }
-.btn { background:var(--pri2); color:#fff; border:0; padding:.5rem .9rem; border-radius:6px;
-       cursor:pointer; font-size:.9rem; }
-.btn:hover { background:var(--pri); }
-.btn.secondary { background:#fff; color:var(--ink); border:1px solid var(--border); }
-.meta { color:var(--muted); font-size:.85rem; margin:.5rem 0 1rem; }
-.stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-         gap:.75rem; margin:.5rem 0 1rem; }
-.stats .stat { background:#fff; border:1px solid var(--border); border-radius:8px;
-               padding:.7rem .9rem; display:flex; flex-direction:column; align-items:flex-start; }
-.stats .stat .num { font-size:1.4rem; font-weight:600; color:var(--ink); }
-.stats .stat .lbl { font-size:.78rem; color:var(--muted); text-transform:uppercase;
-                    letter-spacing:.04em; }
-table { width:100%; border-collapse:collapse; font-size:.85rem; }
-thead th { text-align:left; background:#f0f2f5; padding:.55rem .6rem; border-bottom:1px solid var(--border);
-           font-weight:600; color:var(--ink); position:sticky; top:0; }
-tbody td { padding:.55rem .6rem; border-bottom:1px solid var(--border); vertical-align:top; }
-tbody tr:nth-child(even) { background:var(--row); }
-.txt { white-space:pre-wrap; word-break:break-word; max-width:380px; }
-.tag { display:inline-block; padding:.1rem .45rem; border-radius:999px; font-size:.75rem;
-       background:#dbeafe; color:#1e3a8a; }
-.tag.wa { background:#dcfce7; color:#166534; }
-.tag.wc { background:#fef3c7; color:#92400e; }
-.pager { margin-top:1rem; display:flex; gap:.5rem; justify-content:center; align-items:center; }
-.pager a, .pager span { padding:.4rem .7rem; border-radius:6px; border:1px solid var(--border);
-                       text-decoration:none; color:var(--ink); font-size:.85rem; background:#fff; }
-.pager a:hover { background:#f0f2f5; }
-.pager .actual { background:var(--pri2); color:#fff; border-color:var(--pri2); }
-.errmsg { background:#fee2e2; color:#991b1b; padding:.5rem .7rem; border-radius:6px;
-          margin-bottom:.75rem; font-size:.9rem; }
-.empty { text-align:center; padding:2rem; color:var(--muted); }
-"""
-
-login_html = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Acceso · Real[IA]</title>
-  <style>{{ css|safe }}
-    .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center;
-                  background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%); }
-    .login-card { background:#fff; padding:2rem; border-radius:10px; width:100%; max-width:360px;
-                  box-shadow:0 10px 30px rgba(0,0,0,.15); }
-    .login-card h1 { margin:0 0 .25rem; font-size:1.2rem; }
-    .login-card p.sub { margin:0 0 1.25rem; color:var(--muted); font-size:.85rem; }
-    .login-card label { display:block; font-size:.8rem; color:var(--muted); margin:.5rem 0 .25rem; }
-    .login-card input { width:100%; padding:.55rem .6rem; border:1px solid var(--border);
-                        border-radius:6px; font-size:.95rem; }
-    .login-card .btn { width:100%; margin-top:1rem; padding:.65rem; font-size:.95rem; }
-  </style>
-</head>
-<body>
-  <div class="login-wrap">
-    <form method="POST" class="login-card">
-      <h1>Real[IA] · Administración</h1>
-      <p class="sub">Ingresa para ver las interacciones del chatbot.</p>
-      {% with messages = get_flashed_messages() %}
-        {% for message in messages %}
-          <div class="errmsg">{{ message }}</div>
-        {% endfor %}
-      {% endwith %}
-      <label>Usuario</label>
-      <input type="text" name="usuario" required autofocus autocomplete="username">
-      <label>Contraseña</label>
-      <input type="password" name="password" required autocomplete="current-password">
-      <button class="btn" type="submit">Ingresar</button>
-    </form>
-  </div>
-</body>
-</html>
-"""
-
-consulta_html = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Interacciones · Real[IA]</title>
-  <style>{{ css|safe }}
-    /* Modal */
-    .modal-bg { position:fixed; inset:0; background:rgba(15,23,42,.55); display:none;
-                align-items:center; justify-content:center; z-index:100; padding:1.5rem; }
-    .modal-bg.open { display:flex; }
-    .modal { background:#fff; border-radius:10px; width:100%; max-width:1100px; height:88vh;
-             display:flex; flex-direction:column; overflow:hidden; box-shadow:0 25px 60px rgba(0,0,0,.3); }
-    .modal-head { background:var(--pri); color:#fff; padding:.7rem 1rem; display:flex;
-                  justify-content:space-between; align-items:center; }
-    .modal-head h2 { margin:0; font-size:1rem; font-weight:600; }
-    .modal-head .close { background:transparent; border:0; color:#fff; font-size:1.3rem;
-                         cursor:pointer; padding:0 .3rem; }
-    .modal-body { flex:1; display:grid; grid-template-columns:1.4fr 1fr; overflow:hidden; }
-    @media (max-width:820px){ .modal-body { grid-template-columns:1fr; } }
-    .panel { display:flex; flex-direction:column; overflow:hidden; border-right:1px solid var(--border); }
-    .panel:last-child { border-right:0; }
-    .panel-head { background:#f0f2f5; padding:.55rem .9rem; font-size:.85rem; font-weight:600;
-                  color:var(--ink); border-bottom:1px solid var(--border); }
-    .panel-body { flex:1; overflow-y:auto; padding:1rem; }
-
-    /* Chat (estilo webchat) */
-    .chat { background:#e5ddd5; }
-    .chat .message { max-width:75%; margin-bottom:.6rem; padding:.55rem .8rem; border-radius:14px;
-                     font-size:.88rem; line-height:1.35; word-break:break-word; white-space:pre-wrap;
-                     box-shadow:0 1px 1px rgba(0,0,0,.08); }
-    .chat .user { align-self:flex-end; background:#dcf8c6; border-bottom-right-radius:2px; }
-    .chat .bot  { align-self:flex-start; background:#ffffff; border-bottom-left-radius:2px; }
-    .chat .row { display:flex; flex-direction:column; margin-bottom:.4rem; }
-    .chat .row.right { align-items:flex-end; }
-    .chat .ts { font-size:.7rem; color:#777; margin-top:.15rem; }
-
-    /* Intents */
-    .turn { border:1px solid var(--border); border-radius:8px; padding:.6rem .75rem;
-            margin-bottom:.6rem; background:#fff; font-size:.85rem; }
-    .turn .head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:.3rem; }
-    .turn .ts { color:var(--muted); font-size:.75rem; }
-    .turn .intent { display:inline-block; background:#dbeafe; color:#1e3a8a; padding:.1rem .5rem;
-                    border-radius:999px; font-weight:600; font-size:.78rem; }
-    .turn .intent.personal { background:#fee2e2; color:#991b1b; }
-    .turn .intent.ayuda { background:#dcfce7; color:#166534; }
-    .turn .intent.saludo { background:#fef3c7; color:#92400e; }
-    .turn .src { display:inline-block; padding:.05rem .4rem; border-radius:6px; font-size:.7rem;
-                 font-weight:600; margin-left:.4rem; vertical-align:middle; }
-    .turn .src.regla { background:#e0e7ff; color:#3730a3; }
-    .turn .src.llm   { background:#fce7f3; color:#9d174d; }
-    .turn .src.menu  { background:#d1fae5; color:#065f46; }
-    .turn .src.\\-   { background:#f3f4f6; color:#6b7280; }
-    .turn .pregunta { color:var(--muted); font-style:italic; margin-bottom:.3rem; }
-    .turn .ents { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.25rem; }
-    .turn .ent { background:#f0f2f5; color:#374151; padding:.08rem .45rem; border-radius:6px;
-                 font-size:.72rem; font-family:ui-monospace,Menlo,Consolas,monospace; }
-    .turn.empty { color:var(--muted); text-align:center; padding:1rem; font-style:italic; }
-    .iconbtn { background:transparent; border:1px solid var(--border); padding:.3rem .6rem;
-               border-radius:6px; cursor:pointer; font-size:.8rem; color:var(--pri); }
-    .iconbtn:hover { background:#eff6ff; }
-
-    /* Listado de conversaciones */
-    .convs { display:flex; flex-direction:column; gap:.5rem; padding:.75rem; }
-    .conv { display:flex; justify-content:space-between; align-items:center; gap:1rem;
-            background:#fff; border:1px solid var(--border); border-radius:8px;
-            padding:.7rem .9rem; cursor:pointer; transition:background .12s, border-color .12s; }
-    .conv:hover { background:#fafbfc; border-color:#cbd5e1; }
-    .conv:focus { outline:2px solid var(--pri2); outline-offset:1px; }
-    .conv .chev { color:var(--muted); font-size:1.25rem; line-height:1; padding-left:.25rem;
-                  user-select:none; }
-    .conv:hover .chev { color:var(--pri2); }
-    .conv .info { flex:1; min-width:0; }
-    .conv .topline { display:flex; flex-wrap:wrap; gap:.6rem 1.1rem; align-items:baseline;
-                     margin-bottom:.25rem; }
-    .conv .topline .cliente { font-weight:600; color:var(--ink); font-size:.95rem; }
-    .conv .topline .tel { color:var(--pri2); font-size:.85rem; font-weight:500; white-space:nowrap; }
-    .conv .topline .sid { font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--muted);
-                          font-size:.78rem; word-break:break-all; }
-    .conv .fechas { color:var(--muted); font-size:.82rem; }
-    .conv .right { display:flex; align-items:center; gap:.75rem; flex-shrink:0; }
-    .conv .msgs { font-size:.78rem; color:var(--muted); white-space:nowrap; }
-    .conv .msgs strong { color:var(--ink); }
-
-    /* Raw intent JSON */
-    .turn .raw { margin-top:.45rem; }
-    .turn .raw pre { background:#f7f8fa; border:1px solid var(--border); padding:.45rem .55rem;
-                     border-radius:6px; margin:0; overflow:auto; font-size:.72rem;
-                     line-height:1.35; max-height:200px; white-space:pre-wrap;
-                     font-family:ui-monospace,Menlo,Consolas,monospace; color:#374151; }
-    .turn .raw summary { cursor:pointer; color:var(--muted); font-size:.72rem;
-                         font-style:italic; padding:.15rem 0; user-select:none; }
-    .turn .raw summary:hover { color:var(--pri2); }
-
-    /* Toggle de intents */
-    .modal-head .actions { display:flex; align-items:center; gap:.5rem; }
-    .modal-head .htoggle { background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.4);
-                           color:#fff; font-size:.78rem; padding:.25rem .6rem; border-radius:6px;
-                           cursor:pointer; }
-    .modal-head .htoggle:hover { background:rgba(255,255,255,.28); }
-    .modal-body.hide-intents { grid-template-columns:1fr; }
-    .modal-body.hide-intents .panel-intents { display:none; }
-
-    /* Compositor de mensajes */
-    .composer { display:flex; gap:.5rem; padding:.6rem; border-top:1px solid var(--border);
-                background:#f7f8fa; align-items:flex-end; }
-    .composer textarea { flex:1; resize:none; min-height:38px; max-height:120px; padding:.5rem .6rem;
-                         border:1px solid var(--border); border-radius:8px; font-size:.88rem;
-                         font-family:inherit; line-height:1.35; }
-    .composer textarea:focus { outline:2px solid var(--pri2); outline-offset:0; border-color:var(--pri2); }
-    .composer .send { background:var(--pri2); color:#fff; border:0; border-radius:8px;
-                      padding:.5rem .95rem; font-size:.88rem; cursor:pointer; white-space:nowrap; }
-    .composer .send:hover { background:var(--pri); }
-    .composer .send:disabled { opacity:.55; cursor:not-allowed; }
-    .composer .hint { font-size:.7rem; color:#991b1b; padding:.2rem .6rem; }
-  </style>
-</head>
-<body>
-  <div class="topbar">
-    <h1>Real[IA] · Interacciones</h1>
-    <span>
-      <a href="{{ url_for('respuestas_plantilla') }}" style="margin-right:.75rem;">Respuestas de Clientes</a>
-      Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a>
-    </span>
-  </div>
-  <div class="container">
-    <form method="GET" class="card">
-      <div class="filtros">
-        <div>
-          <label>Desde</label>
-          <input type="date" name="desde" value="{{ filtros.desde or '' }}">
-        </div>
-        <div>
-          <label>Hasta</label>
-          <input type="date" name="hasta" value="{{ filtros.hasta or '' }}">
-        </div>
-        <div>
-          <label>Canal</label>
-          <select name="canal">
-            <option value="">Todos</option>
-            <option value="wa" {% if filtros.canal == 'wa' %}selected{% endif %}>WhatsApp</option>
-            <option value="wc" {% if filtros.canal == 'wc' %}selected{% endif %}>Web</option>
-          </select>
-        </div>
-        <div>
-          <label>Buscar</label>
-          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Texto del mensaje">
-        </div>
-        <div>
-          <label>Por página</label>
-          <select name="pp">
-            {% for n in [25, 50, 100, 200] %}
-            <option value="{{ n }}" {% if filtros.por_pagina == n %}selected{% endif %}>{{ n }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div style="grid-column: span 2; display:flex; gap:.5rem; flex-wrap:wrap;">
-          <button class="btn" type="submit">Filtrar</button>
-          <a class="btn secondary" href="{{ url_for('interacciones') }}">Limpiar</a>
-          <a class="btn secondary" href="{{ url_for('interacciones_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'q':filtros.q}) }}">Exportar CSV</a>
-        </div>
-      </div>
-    </form>
-
-    <div class="stats">
-      <div class="stat"><span class="num">{{ stats.conversaciones }}</span><span class="lbl">conversaciones</span></div>
-      <div class="stat"><span class="num">{{ stats.mensajes }}</span><span class="lbl">mensajes</span></div>
-      <div class="stat"><span class="num">{{ stats.wa }}</span><span class="lbl">WhatsApp</span></div>
-      <div class="stat"><span class="num">{{ stats.wc }}</span><span class="lbl">Web</span></div>
-      <div class="stat"><span class="num">{{ stats.clientes }}</span><span class="lbl">clientes únicos</span></div>
-    </div>
-
-    <div class="meta">
-      Mostrando {{ desde_idx }}–{{ hasta_idx }} de {{ total }} conversaciones.
-    </div>
-
-    <div class="card" style="padding:0;">
-      {% if conversaciones %}
-      <div class="convs">
-        {% for c in conversaciones %}
-        <div class="conv" role="button" tabindex="0"
-             onclick="abrirConversacion({{ c.conversacion_id }})"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirConversacion({{ c.conversacion_id }})}">
-          <div class="info">
-            <div class="topline">
-              <span class="cliente">{{ c.cliente }}</span>
-              {% if c.telefono %}<span class="tel">{{ c.telefono }}</span>{% endif %}
-              <span class="sid">Conversación #{{ c.conversacion_id }}</span>
-            </div>
-            <div class="fechas">{{ c.fecha_inicio }} → {{ c.fecha_fin }}</div>
-          </div>
-          <div class="right">
-            <span class="tag {{ c.canal }}">{{ c.canal }}</span>
-            <span class="msgs"><strong>{{ c.mensajes }}</strong> {% if c.mensajes == 1 %}msg{% else %}msgs{% endif %}</span>
-            <span class="chev" aria-hidden="true">›</span>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      {% else %}
-      <div class="empty">No hay conversaciones con esos filtros.</div>
-      {% endif %}
-    </div>
-
-    {% if total_paginas > 1 %}
-    <div class="pager">
-      {% if pagina > 1 %}
-        <a href="{{ url_for('interacciones', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'pp':filtros.por_pagina,'p':pagina-1}) }}">← Anterior</a>
-      {% endif %}
-      <span class="actual">Página {{ pagina }} de {{ total_paginas }}</span>
-      {% if pagina < total_paginas %}
-        <a href="{{ url_for('interacciones', **{'desde':filtros.desde,'hasta':filtros.hasta,'canal':filtros.canal,'pp':filtros.por_pagina,'p':pagina+1}) }}">Siguiente →</a>
-      {% endif %}
-    </div>
-    {% endif %}
-  </div>
-
-  <!-- Modal de conversación -->
-  <div class="modal-bg" id="modal" onclick="if(event.target.id==='modal')cerrarModal()">
-    <div class="modal">
-      <div class="modal-head">
-        <h2 id="modal-title">Conversación</h2>
-        <div class="actions">
-          <button class="htoggle" id="btn-toggle-intents" onclick="toggleIntents()">Ocultar intents</button>
-          <button class="close" onclick="cerrarModal()" aria-label="Cerrar">×</button>
-        </div>
-      </div>
-      <div class="modal-body" id="modal-body">
-        <div class="panel">
-          <div class="panel-head">Chat</div>
-          <div class="panel-body chat" id="panel-chat"></div>
-          <div class="composer">
-            <textarea id="composer-text" placeholder="Escribe un mensaje…" rows="1"
-                      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();enviarMensaje();}"></textarea>
-            <button class="send" id="composer-send" onclick="enviarMensaje()">Enviar</button>
-          </div>
-          <div class="hint" id="composer-hint" style="display:none;"></div>
-        </div>
-        <div class="panel panel-intents">
-          <div class="panel-head">Intents identificados</div>
-          <div class="panel-body" id="panel-intents"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    const $chat = document.getElementById('panel-chat');
-    const $intents = document.getElementById('panel-intents');
-    const $title = document.getElementById('modal-title');
-    const $modal = document.getElementById('modal');
-    const $body = document.getElementById('modal-body');
-    const $text = document.getElementById('composer-text');
-    const $send = document.getElementById('composer-send');
-    const $hint = document.getElementById('composer-hint');
-    const $btnToggle = document.getElementById('btn-toggle-intents');
-
-    let convActual = null;     // id de la conversación abierta
-    let canalActual = null;    // 'wa' | 'wc' | ...
-    let pollTimer = null;      // intervalo de refresco para "recibir"
-
-    function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]); }
-    // Convierte timestamp UTC ('YYYY-MM-DD HH:MM:SS' o ISO) a 'DD/MM/YYYY hh:mm:ss AM/PM' AST (GMT-4).
-    function fmtTs(ts){
-      if (!ts) return '';
-      const d = new Date(String(ts).replace(' ','T') + 'Z');
-      if (isNaN(d)) return ts;
-      const a = new Date(d.getTime() - 4*3600*1000);
-      const pad = n => String(n).padStart(2,'0');
-      let h = a.getUTCHours();
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      h = h % 12 || 12;
-      return `${pad(a.getUTCDate())}/${pad(a.getUTCMonth()+1)}/${a.getUTCFullYear()} ${pad(h)}:${pad(a.getUTCMinutes())}:${pad(a.getUTCSeconds())} ${ampm}`;
-    }
-    function lblCliente(v){
-      return (v == null || v === '' || v === '0' || v === 0) ? 'Cliente N/D' : 'Cliente ' + v;
-    }
-
-    // ── Toggle de intents ──────────────────────────────────────────────
-    function toggleIntents(){
-      const oculto = $body.classList.toggle('hide-intents');
-      $btnToggle.textContent = oculto ? 'Mostrar intents' : 'Ocultar intents';
-    }
-
-    // ── Recibir: refresco periódico de la conversación abierta ─────────
-    function cargarConversacion(inicial){
-      if (convActual == null) return;
-      fetch('/interacciones/conversacion/' + encodeURIComponent(convActual))
-        .then(r => r.json())
-        .then(d => renderConversacion(d, inicial))
-        .catch(e => { if (inicial) $chat.innerHTML = '<p style="color:#991b1b;">Error: '+esc(e)+'</p>'; });
-    }
-
-    function abrirConversacion(conversacionId){
-      convActual = conversacionId;
-      $chat.innerHTML = '<p style="text-align:center;color:#666;">Cargando...</p>';
-      $intents.innerHTML = '';
-      $title.textContent = 'Conversación #' + conversacionId;
-      $hint.style.display = 'none';
-      $text.value = '';
-      $modal.classList.add('open');
-      cargarConversacion(true);
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = setInterval(() => cargarConversacion(false), 4000);  // "recibir"
-    }
-
-    function cerrarModal(){
-      $modal.classList.remove('open');
-      convActual = null;
-      if (pollTimer){ clearInterval(pollTimer); pollTimer = null; }
-    }
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarModal(); });
-
-    // ── Enviar mensaje del agente ──────────────────────────────────────
-    function enviarMensaje(){
-      const texto = ($text.value || '').trim();
-      if (!texto || convActual == null) return;
-      $send.disabled = true;
-      $hint.style.display = 'none';
-      fetch('/interacciones/conversacion/' + encodeURIComponent(convActual) + '/enviar', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({texto})
-      })
-        .then(r => r.json().then(j => ({ok: r.ok, j})))
-        .then(({ok, j}) => {
-          if (ok && j.ok){
-            $text.value = '';
-            $text.style.height = 'auto';
-            cargarConversacion(false);
-          } else {
-            const err = (j && j.error) || 'error';
-            $hint.textContent = err === 'sin_telefono'
-              ? 'No hay teléfono asociado para enviar por WhatsApp.'
-              : 'No se pudo enviar el mensaje (' + esc(err) + ').';
-            $hint.style.display = 'block';
-          }
-        })
-        .catch(e => { $hint.textContent = 'Error de red al enviar.'; $hint.style.display = 'block'; })
-        .finally(() => { $send.disabled = false; });
-    }
-
-    // Auto-crecer el textarea
-    if ($text){
-      $text.addEventListener('input', () => {
-        $text.style.height = 'auto';
-        $text.style.height = Math.min($text.scrollHeight, 120) + 'px';
-      });
-    }
-
-    function renderConversacion(data, inicial){
-      const msgs = data.mensajes || [];
-      canalActual = data.canal || null;
-      const tel = data.telefono ? ' · ' + esc(data.telefono) : '';
-      $title.innerHTML = esc((data.canal||'?').toUpperCase()) + ' · ' + esc(lblCliente(data.cod_persona)) + tel + ' · Conversación #' + esc(data.conversacion_id);
-
-      // ¿El usuario estaba viendo el final? (para no romper su scroll al refrescar)
-      const pegadoAlFondo = inicial || ($chat.scrollHeight - $chat.scrollTop - $chat.clientHeight) < 60;
-
-      $chat.innerHTML = msgs.map(m => {
-        const entrante = String(m.direccion || '').toUpperCase() === 'IN';
-        const ep = (m.enviado_por && m.enviado_por !== 'sistema') ? m.enviado_por : '';
-        const autor = entrante ? (ep || 'Usuario') : (ep || 'Bot/Agente');
-        return `<div class="row ${entrante ? '' : 'right'}">
-          <div class="message ${entrante ? 'bot' : 'user'}">${esc(m.contenido)}</div>
-          <div class="ts">${esc(autor)} · ${fmtTs(m.fecha)}</div>
-        </div>`;
-      }).join('') || '<p style="text-align:center;color:#666;">Sin mensajes.</p>';
-      // Mostrar el mensaje más nuevo: los mensajes van en orden cronológico, así que
-      // posicionamos el scroll del chat hasta el final (último = más reciente).
-      if (pegadoAlFondo) $chat.scrollTop = $chat.scrollHeight;
-
-      // Intents (panel derecho)
-      $intents.innerHTML = msgs.map(m => {
-        const I = m.intencion;
-        const isObj = I && typeof I === 'object';
-        const intent = (isObj && I.intent) || (typeof I === 'string' ? I : '—');
-        const tipo = (isObj ? (I.type || '') : '').toLowerCase();
-        const ents = isObj && Array.isArray(I.entity) ? I.entity : (isObj && I.entity ? [I.entity] : []);
-        const entHTML = ents.length
-          ? '<div class="ents">' + ents.map(e => {
-              if (e && typeof e === 'object'){
-                const tag = [e.tipo, e.subtipo, e.valor].filter(Boolean).join('/');
-                return '<span class="ent">'+esc(tag||JSON.stringify(e))+'</span>';
-              }
-              return '<span class="ent">'+esc(e)+'</span>';
-            }).join('') + '</div>'
-          : '';
-        const raw = I == null ? '' : JSON.stringify(I, null, 2);
-        const rawHTML = raw
-          ? `<details class="raw"><summary>Ver data raw</summary><pre>${esc(raw)}</pre></details>`
-          : '';
-        const src = (m.intent_source || (isObj ? I.intent_source : '') || '').toLowerCase();
-        const srcHTML = src
-          ? `<span class="src ${esc(src.replace(/[^a-z]/g,''))}" title="Fuente del intent">${esc(src)}</span>`
-          : '';
-        return `<div class="turn">
-          <div class="head">
-            <span class="intent ${esc(tipo)}">${esc(intent)}${tipo?' · '+esc(tipo):''}</span>${srcHTML}
-            <span class="ts">${fmtTs(m.fecha)}</span>
-          </div>
-          <div class="pregunta">"${esc(m.contenido)}"</div>
-          ${entHTML}
-          ${rawHTML}
-        </div>`;
-      }).join('') || '<div class="turn empty">Sin intents.</div>';
-    }
-  </script>
-</body>
-</html>
-"""
 
 def _require_login():
     if 'usuario' not in session:
         return redirect(url_for('login'))
     return None
 
-# ─── Template: Respuestas de Plantillas ────────────────────────────────────
-plantillas_html = """
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8">
-  <title>Respuestas de Plantillas · Real[IA]</title>
-  <style>{{ css|safe }}
-    .badge { display:inline-block; padding:.15rem .5rem; border-radius:999px; font-size:.75rem; font-weight:600; }
-    .badge.con-url  { background:#dcfce7; color:#166534; }
-    .badge.sin-url  { background:#fef3c7; color:#92400e; }
-    table td { vertical-align:middle; }
-    td.nombre   { font-weight:600; font-size:.87rem; }
-    td.desc     { max-width:200px; font-size:.8rem; color:var(--muted); }
-    td.msg      { max-width:180px; font-size:.8rem; font-style:italic; white-space:pre-wrap; word-break:break-word; }
-    td.tel      { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.82rem; }
-    td.tmpl     { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.7rem; color:var(--muted);
-                  max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .info-banner { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:.65rem 1rem;
-                   font-size:.87rem; color:#1e40af; margin-bottom:1rem; }
-    details.fd summary { cursor:pointer; color:var(--pri2); font-size:.75rem; }
-    details.fd pre { background:#f7f8fa; border:1px solid var(--border); border-radius:6px;
-                     padding:.4rem .55rem; margin:.25rem 0 0; font-size:.72rem;
-                     font-family:ui-monospace,Menlo,Consolas,monospace;
-                     max-height:160px; overflow:auto; white-space:pre-wrap; }
-  </style>
-</head>
-<body>
-  <div class="topbar">
-    <h1>Real[IA] · Respuestas de Plantillas</h1>
-    <span>
-      <a href="{{ url_for('interacciones') }}" style="margin-right:.75rem;">← Interacciones</a>
-      Sesión: <strong>{{ usuario }}</strong> · <a href="{{ url_for('logout') }}">Cerrar sesión</a>
-    </span>
-  </div>
-  <div class="container">
-    <div class="info-banner">      
-    </div>
-    <form method="GET" class="card">
-      <div class="filtros">
-        <div><label>Desde</label><input type="date" name="desde" value="{{ filtros.desde or '' }}"></div>
-        <div><label>Hasta</label><input type="date" name="hasta" value="{{ filtros.hasta or '' }}"></div>
-        <div>
-          <label>Buscar (teléfono o mensaje)</label>
-          <input type="text" name="q" value="{{ filtros.q or '' }}" placeholder="Número o texto…">
-        </div>
-        <div>
-          <label>Por página</label>
-          <select name="pp">
-            {% for n in [25, 50, 100, 200] %}
-            <option value="{{ n }}" {% if filtros.por_pagina == n %}selected{% endif %}>{{ n }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div style="grid-column:span 2; display:flex; gap:.5rem; flex-wrap:wrap; align-items:flex-end;">
-          <button class="btn" type="submit">Filtrar</button>
-          <a class="btn secondary" href="{{ url_for('respuestas_plantilla') }}">Limpiar</a>
-          <a class="btn secondary"
-             href="{{ url_for('respuestas_plantilla_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or ''}) }}">
-            ⬇ Exportar CSV
-          </a>
-        </div>
-      </div>
-    </form>
-    <div class="stats">
-      <div class="stat"><span class="num">{{ total }}</span><span class="lbl">respuestas totales</span></div>
-      <div class="stat"><span class="num">{{ stats.con_url }}</span><span class="lbl">con enlace URL</span></div>
-      <div class="stat"><span class="num">{{ stats.sin_url }}</span><span class="lbl">sin URL (reenviadas)</span></div>
-    </div>
-    <div class="meta">Mostrando {{ desde_idx }}–{{ hasta_idx }} de {{ total }} registros.</div>
-    <div class="card" style="padding:0; overflow-x:auto;">
-      {% if filas %}
-      <table>
-        <thead>
-          <tr>
-            <th>Fecha recibido</th>
-            <th>Teléfono</th>
-            <th>Nombre</th>
-            <th>Evento / Descripción</th>
-            <th>Enlace</th>
-            <th>Mensaje del cliente</th>
-            <th>Template ID</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in filas %}
-          <tr>
-            <td style="white-space:nowrap; font-size:.82rem;">{{ r.fecha }}</td>
-            <td class="tel">{{ r.telefono }}</td>
-            <td class="nombre">{{ r.nombre or '—' }}</td>
-            <td class="desc">
-              {{ r.descripcion or 'Encuesta' }}
-              {% if r.fields_json %}
-              <details class="fd"><summary>Ver todos los campos</summary><pre>{{ r.fields_json }}</pre></details>
-              {% endif %}
-            </td>
-            <td>
-              {% if r.url %}
-                <a class="url-link" href="{{ r.url }}" target="_blank" rel="noopener"
-                   style="color:var(--pri2);text-decoration:none;font-size:.8rem;word-break:break-all;">
-                  {{ r.url[:60] }}{% if r.url|length > 60 %}…{% endif %}
-                </a>
-              {% endif %}
-            </td>
-            <td class="msg">{{ r.mensaje }}</td>
-            <td class="tmpl" title="{{ r.template_id }}">
-              {{ r.template_id[:20] if r.template_id else '—' }}{% if r.template_id and r.template_id|length > 20 %}…{% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div class="empty">No hay respuestas con esos filtros.</div>
-      {% endif %}
-    </div>
-    {% if total_paginas > 1 %}
-    <div class="pager">
-      {% if pagina > 1 %}
-        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina-1}) }}">← Anterior</a>
-      {% endif %}
-      <span class="actual">Página {{ pagina }} de {{ total_paginas }}</span>
-      {% if pagina < total_paginas %}
-        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina+1}) }}">Siguiente →</a>
-      {% endif %}
-    </div>
-    {% endif %}
-  </div>
-</body>
-</html>
-"""
 
 
 def _parse_plantilla_row(r):
@@ -2701,9 +2100,13 @@ def _parse_plantilla_row(r):
         if not matches:
             return {}
         m = matches[0]
-        detalle = m.get('detalle')        
-        id = detalle.get('id')
-        intent_data = detalle.get('contents')[0]
+        detalle = m.get('detalle')
+        #logg(f"detalle: {json.dumps(detalle, ensure_ascii=False, indent=2)}")
+        try:
+            id = detalle.get('id')
+            intent_data = detalle.get('contents')[0]
+        except Exception:
+            return {}
         #logg(f"intent_data: {json.dumps(intent_data, ensure_ascii=False, indent=2)}")
         
     except (TypeError, ValueError):
@@ -2760,8 +2163,8 @@ def respuestas_plantilla():
     desde_idx = 0 if total == 0 else (pagina - 1) * por_pagina + 1
     hasta_idx = min(total, pagina * por_pagina)
 
-    return render_template_string(
-        plantillas_html, css=_BASE_CSS,
+    return render_template(
+        'plantillas.html',
         usuario=session.get('usuario'),
         filas=filas, total=total,
         stats={'con_url': con_url, 'sin_url': sin_url},
@@ -2788,10 +2191,11 @@ def respuestas_plantilla_csv():
     ])
     for r in filas_raw:
         d = _parse_plantilla_row(r)
-        w.writerow([
-            d['fecha'], d['telefono'], d['nombre'], d['descripcion'],
-            d['url'], d['mensaje'], d['template_id'], d['outgoing_msg_id'], d['fields_json'],
-        ])
+        if d:
+            w.writerow([
+                d['fecha'], d['telefono'], d['nombre'], d['descripcion'],
+                d['url'], d['mensaje'], d['template_id'], d['outgoing_msg_id'], d['fields_json'],
+            ])
     out = buf.getvalue()
     fname = f"respuestas_plantilla_{f['desde']}_{f['hasta']}.csv"
     return app.response_class(
@@ -2818,7 +2222,7 @@ def login():
             return redirect(url_for('interacciones'))
         
         flash('Credenciales incorrectas')
-    return render_template_string(login_html, css=_BASE_CSS)
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
@@ -2908,9 +2312,8 @@ def interacciones():
     desde_idx = 0 if total == 0 else (pagina - 1) * por_pagina + 1
     hasta_idx = min(total, pagina * por_pagina)
 
-    return render_template_string(
-        consulta_html,
-        css=_BASE_CSS,
+    return render_template(
+        'dashboard.html',
         usuario=session.get('usuario'),
         conversaciones=conversaciones,
         stats=stats,
@@ -2918,6 +2321,84 @@ def interacciones():
         pagina=pagina, desde_idx=desde_idx, hasta_idx=hasta_idx,
         filtros={**f, 'por_pagina': por_pagina},
     )
+
+
+# ─── Helpers de atención humana (handoff) ─────────────────────────────────
+def _norm_b(v):
+    """Normaliza un valor de Redis (bytes/str/None) a str en minúsculas o ''."""
+    if v is None:
+        return ''
+    if isinstance(v, (bytes, bytearray)):
+        v = v.decode('utf-8', 'ignore')
+    return str(v).strip().lower()
+
+def _clave_redis(canal, session_id, telefono):
+    """Clave usada en Redis por procesar(): session_id en web, teléfono en WhatsApp.
+    Replica la convención existente (no introduce un esquema nuevo)."""
+    if canal == 'wc':
+        return session_id
+    return telefono or session_id
+
+def _label_estado_validacion(estado):
+    """Traduce el estado_validacion de Redis a una etiqueta para el perfil:
+    'Sin validar' | 'Validando' | 'Validado'."""
+    e = _norm_b(estado)
+    if e == 'validado':
+        return 'Validado'
+    if e in ('esperando_cedula', 'esperando_telefono', 'esperando_otp'):
+        return 'Validando'
+    return 'Sin validar'
+
+def _nombre_cliente(cod_persona, clave=None):
+    """Nombre del cliente: Oracle (buscar_cliente) o, en su defecto, el nombre
+    guardado en Redis durante la validación."""
+    nombre = ''
+    if cod_persona and str(cod_persona) not in ('0', ''):
+        try:
+            datos = buscar_cliente(str(cod_persona))
+            if datos and datos.get('nombres'):
+                nombre = datos['nombres'].strip()
+        except Exception as e:
+            loge(f"_nombre_cliente: {e}")
+    if not nombre and clave:
+        nb = redisdb.get_variable(clave, "nombres")
+        nombre = _norm_b(nb).title() if nb else ''
+    return nombre
+
+def _enviar_a_conversacion(header, texto, agente):
+    """Persiste un mensaje OUT del agente en la conversación y lo entrega por el
+    canal correspondiente. Reutilizado por /enviar y /atender (no duplica lógica)."""
+    canal = header.get('canal')
+    session_id = header.get('session_id')
+    telefono = header.get('telefono')
+    message_id = str(uuid.uuid4())
+    if canal == 'wa' and not telefono:
+        return False, 'sin_telefono'
+    guardar_mensaje(
+        session_id=session_id, canal=canal, direccion='OUT', contenido=texto,
+        telefono=telefono, message_id=message_id, enviado_por=agente,
+    )
+    if canal == 'wa':
+        enviar_respuesta_wa(message_id, telefono, texto)
+    elif canal == 'wc':
+        enviar_respuesta_web(message_id, session_id, texto)
+    else:
+        return False, 'canal_no_soportado'
+    return True, message_id
+
+def _contexto_personal(cod_persona, entities):
+    """Construye el contexto de productos del cliente reutilizando contexto_cliente()
+    y lo devuelve como (items_list, texto_formateado). NO duplica la lógica de Oracle."""
+    query = {"intent": "consulta", "type": "personal", "entity": entities, "context": []}
+    contexto = contexto_cliente(str(cod_persona), query)  # devuelve JSON string
+    try:
+        items = json.loads(contexto) if isinstance(contexto, str) else (contexto or [])
+    except Exception:
+        items = []
+    if not isinstance(items, list):
+        items = []
+    texto = menu.formatear_contexto_personal(contexto)
+    return items, texto
 
 
 @app.route('/interacciones/conversacion/<int:conversacion_id>')
@@ -2944,6 +2425,14 @@ def interaccion_conversacion(conversacion_id):
             msg = metadata.get('message')
             if isinstance(msg, dict) and msg.get('from'):
                 telefono = msg.get('from')
+        adjunto = None
+        if m.get('tiene_archivo'):
+            adjunto = {
+                'nombre': m.get('archivo_nombre'),
+                'tipo': m.get('archivo_tipo'),
+                'url': m.get('archivo_url'),
+                'size': m.get('archivo_size'),
+            }
         out.append({
             'id': m.get('id'),
             'fecha': m.get('fecha_hora'),
@@ -2952,13 +2441,27 @@ def interaccion_conversacion(conversacion_id):
             'enviado_por': m.get('enviado_por'),
             'intencion': intencion,
             'intent_source': metadata.get('intent_source') if isinstance(metadata, dict) else None,
+            'adjunto': adjunto,
         })
+
+    # Estado de handoff/validación (Redis), para que el panel del agente refleje
+    # en vivo si el cliente ya está validado o si el bot fue silenciado.
+    atendido_por = mensajes[0].get('atendido_por') or 'bot'
+    clave = _clave_redis(canal, session_id, telefono)
+    estado_val = redisdb.get_variable(clave, "estado_validacion")
+    cliente_validado = redisdb.get_variable(clave, "cliente_validado")
+    adjuntos = [m['adjunto'] for m in out if m.get('adjunto')]
     return jsonify({
         'conversacion_id': conversacion_id,
         'session_id': session_id,
         'canal': canal,
         'cod_persona': cod_persona,
         'telefono': telefono if canal != 'wc' else None,
+        'atendido_por': atendido_por,
+        'estado_validacion': _norm_b(estado_val) or 'sin_validar',
+        'estado_validacion_label': _label_estado_validacion(estado_val),
+        'cliente_validado': bool(cliente_validado) or _norm_b(estado_val) == 'validado',
+        'adjuntos': adjuntos,
         'mensajes': out,
     })
 
@@ -2979,39 +2482,245 @@ def interaccion_enviar(conversacion_id):
     if not header:
         return jsonify({'error': 'not_found'}), 404
 
-    canal = header.get('canal')
-    session_id = header.get('session_id')
-    telefono = header.get('telefono')
     agente = session.get('usuario')
-    message_id = str(uuid.uuid4())
-
-    # Para WhatsApp necesitamos el teléfono destino.
-    if canal == 'wa' and not telefono:
-        return jsonify({'error': 'sin_telefono'}), 400
-
     try:
-        # Persistir como OUT en la MISMA conversación (usa el session_id existente).
-        guardar_mensaje(
-            session_id=session_id,
-            canal=canal,
-            direccion='OUT',
-            contenido=texto,
-            telefono=telefono,
-            message_id=message_id,
-            enviado_por=agente,
-        )
-        # Entregar por el canal correspondiente.
-        if canal == 'wa':
-            enviar_respuesta_wa(message_id, telefono, texto)
-        elif canal == 'wc':
-            enviar_respuesta_web(message_id, session_id, texto)
-        else:
-            return jsonify({'error': 'canal_no_soportado'}), 400
+        ok, ref = _enviar_a_conversacion(header, texto, agente)
     except Exception as e:
         loge(f"interaccion_enviar: error enviando mensaje: {e}")
         return jsonify({'error': 'send_failed', 'detalle': str(e)}), 500
+    if not ok:
+        return jsonify({'error': ref}), 400
+    return jsonify({'ok': True, 'message_id': ref})
 
-    return jsonify({'ok': True, 'message_id': message_id})
+
+# ─── FASE 9: endpoints de atención humana y datos del cliente ───────────────
+@app.route('/interacciones/conversacion/<int:conversacion_id>/atender', methods=['POST'])
+def interaccion_atender(conversacion_id):
+    """FASE 5: el agente inicia la atención humana.
+      1. Marca atendido_por=humano (DB + Redis para que procesar() lo respete).
+      2. Obtiene el nombre del agente con nombre_usuario().
+      3. Envía automáticamente el saludo de presentación al cliente.
+      5. (Frontend) habilita editor/enviar/adjuntar al recibir ok=True."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+
+    canal = header.get('canal')
+    session_id = header.get('session_id')
+    telefono = header.get('telefono')
+    cod_persona = header.get('cod_persona')
+    usuario = session.get('usuario')
+    clave = _clave_redis(canal, session_id, telefono)
+
+    # Nombre del agente (Oracle); si falla, usar el usuario de la sesión.
+    try:
+        nombre_agente = nombre_usuario(usuario) or usuario
+    except Exception as e:
+        loge(f"interaccion_atender: nombre_usuario falló: {e}")
+        nombre_agente = usuario
+
+    # 1/4. Registrar atención humana (DB) y reflejarlo en Redis para procesar().
+    marcar_atendido_por(conversacion_id, 'humano', asignado_a=usuario)
+    redisdb.set_variable(clave, "atendido_por", "humano")
+
+    # 3. Saludo automático de presentación.
+    nombre_cliente = _nombre_cliente(cod_persona, clave)
+    saludo = (f"Saludos {nombre_cliente}, le atiende {nombre_agente}."
+              if nombre_cliente else f"Saludos, le atiende {nombre_agente}.")
+    enviado = False
+    try:
+        enviado, ref = _enviar_a_conversacion(header, saludo, usuario)
+    except Exception as e:
+        loge(f"interaccion_atender: error enviando saludo: {e}")
+        ref = 'send_failed'
+
+    return jsonify({
+        'ok': True,
+        'atendido_por': 'humano',
+        'agente': nombre_agente,
+        'saludo': saludo,
+        'saludo_enviado': bool(enviado),
+        'saludo_error': None if enviado else ref,
+    })
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/identificar', methods=['POST'])
+def interaccion_identificar(conversacion_id):
+    """FASE 6: el agente pulsa "Solicitar cédula".
+      1. Marca atendido_por=humano.
+      2. Invoca el flujo de validación EXISTENTE poniendo estado=esperando_cedula
+         y pidiendo la cédula. El cliente responderá y procesar() seguirá el flujo
+         normal (cédula→OTP→SMS→validado) sin duplicar nada."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+
+    canal = header.get('canal')
+    session_id = header.get('session_id')
+    telefono = header.get('telefono')
+    usuario = session.get('usuario')
+    clave = _clave_redis(canal, session_id, telefono)
+    if canal == 'wa' and not telefono:
+        return jsonify({'error': 'sin_telefono'}), 400
+
+    message_id = str(uuid.uuid4())
+    # 1. Atención humana.
+    marcar_atendido_por(conversacion_id, 'humano', asignado_a=usuario)
+    redisdb.set_variable(clave, "atendido_por", "humano")
+    # 2. Preparar el flujo de validación existente (mismas variables que procesar()).
+    redisdb.set_variable(clave, "estado_validacion", "esperando_cedula")
+    redisdb.set_variable(clave, "intencion_pendiente", "")
+    redisdb.set_variable(clave, "pregunta_original", "")
+    redisdb.set_variable(clave, "message_id", message_id)
+    redisdb.set_variable(clave, "modo", "menu")
+    redisdb.del_variable(clave, "cliente_validado")
+
+    prompt = ("Para continuar necesito validar tu identidad. "
+              "Por favor indícame tu número de cédula (sin guiones).")
+    try:
+        ok, ref = _enviar_a_conversacion(header, prompt, usuario)
+    except Exception as e:
+        loge(f"interaccion_identificar: error: {e}")
+        return jsonify({'error': 'send_failed', 'detalle': str(e)}), 500
+    if not ok:
+        return jsonify({'error': ref}), 400
+    return jsonify({'ok': True, 'estado_validacion': 'esperando_cedula'})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/cliente')
+def interaccion_cliente(conversacion_id):
+    """FASE 10: perfil del cliente (Nombre, Código Persona, Teléfono, Canal,
+    Estado de validación)."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+    canal = header.get('canal')
+    session_id = header.get('session_id')
+    telefono = header.get('telefono')
+    cod_persona = header.get('cod_persona')
+    clave = _clave_redis(canal, session_id, telefono)
+    estado_val = redisdb.get_variable(clave, "estado_validacion")
+    return jsonify({
+        'ok': True,
+        'nombre': _nombre_cliente(cod_persona, clave) or 'N/D',
+        'cod_persona': cod_persona if cod_persona not in (None, '', '0', 0) else 'N/D',
+        'telefono': telefono or 'N/D',
+        'canal': canal,
+        'atendido_por': header.get('atendido_por') or 'bot',
+        'estado_validacion': _norm_b(estado_val) or 'sin_validar',
+        'estado_validacion_label': _label_estado_validacion(estado_val),
+    })
+
+
+def _datos_cliente_endpoint(conversacion_id, entities, etiqueta, filtro_subtipo=None):
+    """Núcleo común de los endpoints de productos (cuentas/préstamos/certificados/feria).
+    Exige que el cliente esté validado y reutiliza contexto_cliente()."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+    cod_persona = header.get('cod_persona')
+    canal = header.get('canal')
+    clave = _clave_redis(canal, header.get('session_id'), header.get('telefono'))
+    estado_val = _norm_b(redisdb.get_variable(clave, "estado_validacion"))
+    if not cod_persona or str(cod_persona) in ('0', ''):
+        return jsonify({'ok': False, 'error': 'cliente_no_identificado',
+                        'mensaje': 'El cliente aún no se ha identificado.'}), 409
+    if estado_val != 'validado':
+        return jsonify({'ok': False, 'error': 'cliente_no_validado',
+                        'mensaje': 'El cliente aún no completó la validación de identidad.'}), 409
+    try:
+        items, texto = _contexto_personal(cod_persona, entities)
+    except Exception as e:
+        loge(f"_datos_cliente_endpoint[{etiqueta}]: {e}")
+        return jsonify({'ok': False, 'error': 'error_consulta', 'detalle': str(e)}), 500
+    if filtro_subtipo:
+        items = [it for it in items if (it.get('subtipo') or '').lower() in filtro_subtipo]
+    return jsonify({'ok': True, 'tipo': etiqueta, 'items': items, 'texto': texto})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/cuentas')
+def interaccion_cuentas(conversacion_id):
+    ents = [{"tipo": "producto", "subtipo": "cuenta", "valor": "cuentas"}]
+    return _datos_cliente_endpoint(conversacion_id, ents, 'cuentas', filtro_subtipo={'cuenta'})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/prestamos')
+def interaccion_prestamos(conversacion_id):
+    ents = [{"tipo": "producto", "subtipo": "prestamo", "valor": "prestamos"}]
+    return _datos_cliente_endpoint(conversacion_id, ents, 'prestamos')
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/certificados')
+def interaccion_certificados(conversacion_id):
+    # Los certificados se obtienen del mismo origen que las cuentas y se filtran
+    # por subtipo (clasificación de _clasificar_producto_cuenta en rag_db).
+    ents = [{"tipo": "producto", "subtipo": "cuenta", "valor": "certificados"}]
+    return _datos_cliente_endpoint(conversacion_id, ents, 'certificados', filtro_subtipo={'certificado'})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/feria')
+def interaccion_feria(conversacion_id):
+    ents = [{"tipo": "articulo", "subtipo": "prestamo_feria", "valor": "articulos"}]
+    return _datos_cliente_endpoint(conversacion_id, ents, 'feria')
+
+
+# ─── Acciones adicionales del panel del agente (FASE 8) ─────────────────────
+@app.route('/interacciones/conversacion/<int:conversacion_id>/nota', methods=['POST'])
+def interaccion_nota(conversacion_id):
+    """Nota interna del agente. No se entrega a ningún canal (direccion=NOTE)."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    texto = (request.json or {}).get('texto', '') if request.is_json else request.form.get('texto', '')
+    texto = (texto or '').strip()
+    if not texto:
+        return jsonify({'error': 'empty'}), 400
+    res = guardar_nota_interna(conversacion_id, session.get('usuario'), texto)
+    if not res.get('ok'):
+        return jsonify({'error': res.get('error', 'error')}), 404
+    return jsonify({'ok': True, 'mensaje_id': res.get('mensaje_id')})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/transferir', methods=['POST'])
+def interaccion_transferir(conversacion_id):
+    """Reasigna la conversación a otro agente (mantiene atención humana)."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    destino = (request.json or {}).get('agente', '') if request.is_json else request.form.get('agente', '')
+    destino = (destino or '').strip()
+    if not destino:
+        return jsonify({'error': 'empty'}), 400
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+    transferir_conversacion(conversacion_id, destino)
+    clave = _clave_redis(header.get('canal'), header.get('session_id'), header.get('telefono'))
+    redisdb.set_variable(clave, "atendido_por", "humano")
+    return jsonify({'ok': True, 'asignado_a': destino})
+
+
+@app.route('/interacciones/conversacion/<int:conversacion_id>/cerrar', methods=['POST'])
+def interaccion_cerrar(conversacion_id):
+    """Cierra el caso y devuelve el control al bot (atendido_por=bot)."""
+    if 'usuario' not in session:
+        return jsonify({'error': 'unauthorized'}), 401
+    header = obtener_conversacion_header(conversacion_id)
+    if not header:
+        return jsonify({'error': 'not_found'}), 404
+    cerrar_conversacion(conversacion_id)
+    # Devolver el control al bot: limpiar Redis del handoff/validación.
+    clave = _clave_redis(header.get('canal'), header.get('session_id'), header.get('telefono'))
+    for var in ("atendido_por", "estado_validacion", "cliente_validado",
+                "intencion_pendiente", "pregunta_original", "modo", "menu_mostrado"):
+        redisdb.del_variable(clave, var)
+    return jsonify({'ok': True, 'estado': 'CERRADA'})
 
 
 @app.route('/interacciones/csv')

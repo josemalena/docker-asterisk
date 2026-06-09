@@ -1,0 +1,94 @@
+/* dashboard.css — tema base + listado de interacciones + login + plantillas.
+   Pensado para coexistir con Bootstrap 5 (no se redefinen clases .btn/.card/.table
+   de Bootstrap; sólo se agregan clases propias con prefijo de contexto). */
+:root {
+  --bg:#f5f6f8; --card:#ffffff; --ink:#1f2937; --muted:#6b7280;
+  --pri:#1e3a8a; --pri2:#2563eb; --border:#e5e7eb; --row:#fafafa;
+}
+
+body { background:var(--bg); color:var(--ink); }
+
+/* Topbar */
+.topbar {
+  background:var(--pri); color:#fff; padding:.75rem 1rem;
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem;
+}
+.topbar h1 { margin:0; font-size:1.05rem; font-weight:600; }
+.topbar a { color:#fff; text-decoration:none; opacity:.9; }
+.topbar a:hover { opacity:1; text-decoration:underline; }
+
+/* Stats */
+.stats-row .stat {
+  background:#fff; border:1px solid var(--border); border-radius:8px;
+  padding:.7rem .9rem; display:flex; flex-direction:column; align-items:flex-start; height:100%;
+}
+.stats-row .stat .num { font-size:1.4rem; font-weight:600; color:var(--ink); }
+.stats-row .stat .lbl { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+
+/* Listado de conversaciones */
+.convs { display:flex; flex-direction:column; gap:.5rem; padding:.75rem; }
+.conv {
+  display:flex; justify-content:space-between; align-items:center; gap:1rem;
+  background:#fff; border:1px solid var(--border); border-radius:8px;
+  padding:.7rem .9rem; cursor:pointer; transition:background .12s, border-color .12s;
+}
+.conv:hover { background:#fafbfc; border-color:#cbd5e1; }
+.conv:focus { outline:2px solid var(--pri2); outline-offset:1px; }
+.conv .chev { color:var(--muted); font-size:1.1rem; line-height:1; }
+.conv:hover .chev { color:var(--pri2); }
+.conv .info { flex:1; min-width:0; }
+.conv .topline { display:flex; flex-wrap:wrap; gap:.4rem 1.1rem; align-items:baseline; margin-bottom:.25rem; }
+.conv .topline .cliente { font-weight:600; color:var(--ink); font-size:.95rem; }
+.conv .topline .tel { color:var(--pri2); font-size:.85rem; font-weight:500; white-space:nowrap; }
+.conv .topline .sid { font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--muted); font-size:.78rem; word-break:break-all; }
+.conv .fechas { color:var(--muted); font-size:.82rem; }
+.conv .right { display:flex; align-items:center; gap:.75rem; flex-shrink:0; }
+.conv .msgs { font-size:.78rem; color:var(--muted); white-space:nowrap; }
+.conv .msgs strong { color:var(--ink); }
+
+/* Etiquetas de canal */
+.badge.tag { font-size:.72rem; background:#dbeafe; color:#1e3a8a; text-transform:uppercase; }
+.badge.tag.wa { background:#dcfce7; color:#166534; }
+.badge.tag.wc { background:#fef3c7; color:#92400e; }
+
+/* Paginador */
+.pager { display:flex; gap:.5rem; justify-content:center; align-items:center; }
+.pager a, .pager span {
+  padding:.4rem .7rem; border-radius:6px; border:1px solid var(--border);
+  text-decoration:none; color:var(--ink); font-size:.85rem; background:#fff;
+}
+.pager a:hover { background:#f0f2f5; }
+.pager .actual { background:var(--pri2); color:#fff; border-color:var(--pri2); }
+
+.empty { text-align:center; padding:2rem; color:var(--muted); }
+
+/* Login */
+.login-wrap {
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  background:linear-gradient(135deg,#1e3a8a 0%,#2563eb 100%);
+}
+.login-card {
+  background:#fff; padding:2rem; border-radius:10px; width:100%; max-width:360px;
+  box-shadow:0 10px 30px rgba(0,0,0,.15);
+}
+
+/* Plantillas (respuestas de clientes) */
+.info-banner {
+  background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;
+  padding:.65rem 1rem; font-size:.87rem; color:#1e40af;
+}
+td.nombre { font-weight:600; font-size:.87rem; }
+td.desc { max-width:200px; font-size:.8rem; color:var(--muted); }
+td.msg  { max-width:200px; font-size:.8rem; font-style:italic; white-space:pre-wrap; word-break:break-word; }
+td.tel  { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.82rem; }
+td.tmpl { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.7rem; color:var(--muted);
+          max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.badge.con-url { background:#dcfce7; color:#166534; }
+.badge.sin-url { background:#fef3c7; color:#92400e; }
+details.fd summary { cursor:pointer; color:var(--pri2); font-size:.75rem; }
+details.fd pre {
+  background:#f7f8fa; border:1px solid var(--border); border-radius:6px;
+  padding:.4rem .55rem; margin:.25rem 0 0; font-size:.72rem;
+  font-family:ui-monospace,Menlo,Consolas,monospace;
+  max-height:160px; overflow:auto; white-space:pre-wrap;
+}

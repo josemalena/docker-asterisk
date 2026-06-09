@@ -1,0 +1,19 @@
+{# Componente: Conversación (chat + compositor). El editor/enviar arrancan
+   deshabilitados y se habilitan cuando atendido_por=humano (FASE 5). #}
+<div class="panel panel-chat">
+  <div class="panel-head"><i class="bi bi-chat-dots me-1"></i>Conversación</div>
+  <div class="panel-body chat" id="panel-chat"></div>
+
+  <div class="composer">
+    <textarea id="composer-text" class="form-control" placeholder="Inicia la atención para escribir…"
+              rows="1" disabled></textarea>
+    <button class="btn btn-outline-secondary composer-attach" id="composer-attach"
+            type="button" title="Adjuntar" disabled>
+      <i class="bi bi-paperclip"></i>
+    </button>
+    <button class="btn btn-primary composer-send" id="composer-send" type="button" disabled>
+      <i class="bi bi-send me-1"></i>Enviar
+    </button>
+  </div>
+  <div class="composer-hint small text-danger px-2 pb-1" id="composer-hint" hidden></div>
+</div>

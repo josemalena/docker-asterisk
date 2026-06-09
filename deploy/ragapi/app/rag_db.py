@@ -1,3 +1,4 @@
+#rag_db.py: Manejo de la base de datos y Redis para la aplicación RAG API.
 import oracledb
 import sqlite3
 import redis
@@ -252,6 +253,7 @@ class ConversationManager:
     def getRedis(self):
         return self.redis
 
+redisdb = ConversationManager("0")
 # Crear la base de datos y la tabla si no existen
 def crear_bd():
     conn = sqlite3.connect(CHATBOT_DB)
@@ -313,6 +315,14 @@ def crear_bd():
         if 'canal' in cols_conversaciones:
             cursor.execute("UPDATE conversaciones SET canal_origen = canal WHERE canal_origen IS NULL")
         logg("crear_db: columna 'canal_origen' añadida a conversaciones")
+    # Atención humana (handoff): quién atiende la conversación (bot|humano) y cuándo
+    # se asignó. Se agregan sólo si no existen para no afectar datos actuales.
+    if 'atendido_por' not in cols_conversaciones:
+        cursor.execute("ALTER TABLE conversaciones ADD COLUMN atendido_por TEXT")
+        logg("crear_db: columna 'atendido_por' añadida a conversaciones")
+    if 'fecha_asignacion' not in cols_conversaciones:
+        cursor.execute("ALTER TABLE conversaciones ADD COLUMN fecha_asignacion TIMESTAMP")
+        logg("crear_db: columna 'fecha_asignacion' añadida a conversaciones")
 
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS mensajes (
@@ -629,6 +639,7 @@ def obtener_conversacion_header(conversacion_id):
     cur = con.cursor()
     cur.execute(
         """SELECT c.id, c.session_id, c.cod_persona, c.estado, c.asignado_a,
+                  c.atendido_por, c.fecha_asignacion,
                   COALESCE(MAX(c.canal), c.canal_origen) AS canal,
                   COALESCE(
                       NULLIF(c.telefono, ''),
@@ -646,6 +657,112 @@ def obtener_conversacion_header(conversacion_id):
     return dict(row) if row else None
 
 
+def marcar_atendido_por(conversacion_id, atendido_por, asignado_a=None):
+    """Marca quién atiende la conversación: 'bot' o 'humano'.
+
+    Cuando pasa a 'humano' registra la fecha de asignación y, si se indica,
+    el agente asignado. No toca ninguna otra columna ni mensaje (compatibilidad
+    total con conversaciones existentes)."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    if atendido_por == 'humano':
+        if asignado_a:
+            cur.execute(
+                """UPDATE conversaciones
+                      SET atendido_por = ?, fecha_asignacion = CURRENT_TIMESTAMP, asignado_a = ?
+                    WHERE id = ?""",
+                (atendido_por, asignado_a, conversacion_id),
+            )
+        else:
+            cur.execute(
+                """UPDATE conversaciones
+                      SET atendido_por = ?, fecha_asignacion = CURRENT_TIMESTAMP
+                    WHERE id = ?""",
+                (atendido_por, conversacion_id),
+            )
+    else:
+        cur.execute(
+            "UPDATE conversaciones SET atendido_por = ? WHERE id = ?",
+            (atendido_por, conversacion_id),
+        )
+    con.commit()
+    afectadas = cur.rowcount
+    con.close()
+    logg(f"marcar_atendido_por: conv={conversacion_id} atendido_por={atendido_por} asignado_a={asignado_a}")
+    return afectadas > 0
+
+
+def obtener_atendido_por(conversacion_id):
+    """Devuelve 'bot'|'humano'|None (None = nunca asignado => se trata como bot)."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    cur.execute("SELECT atendido_por FROM conversaciones WHERE id = ?", (conversacion_id,))
+    row = cur.fetchone()
+    con.close()
+    return row[0] if row else None
+
+
+def transferir_conversacion(conversacion_id, asignado_a):
+    """Reasigna la conversación a otro agente (no cambia atendido_por)."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    cur.execute(
+        "UPDATE conversaciones SET asignado_a = ?, atendido_por = 'humano' WHERE id = ?",
+        (asignado_a, conversacion_id),
+    )
+    con.commit()
+    afectadas = cur.rowcount
+    con.close()
+    logg(f"transferir_conversacion: conv={conversacion_id} asignado_a={asignado_a}")
+    return afectadas > 0
+
+
+def cerrar_conversacion(conversacion_id):
+    """Cierra el caso: estado=CERRADA, registra fecha_cierre y devuelve el control
+    al bot (atendido_por='bot')."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    cur.execute(
+        """UPDATE conversaciones
+              SET estado = 'CERRADA',
+                  atendido_por = 'bot',
+                  fecha_cierre = CURRENT_TIMESTAMP
+            WHERE id = ?""",
+        (conversacion_id,),
+    )
+    con.commit()
+    afectadas = cur.rowcount
+    con.close()
+    logg(f"cerrar_conversacion: conv={conversacion_id}")
+    return afectadas > 0
+
+
+def guardar_nota_interna(conversacion_id, agente, texto):
+    """Guarda una nota interna del agente asociada a la conversación.
+
+    Se persiste como un mensaje con direccion='NOTE' para que NO se entregue por
+    ningún canal (la entrega sólo ocurre en endpoints que filtran IN/OUT) y se
+    pueda mostrar en el panel del agente. No crea conversaciones nuevas."""
+    con = sqlite3.connect(CHATBOT_DB)
+    cur = con.cursor()
+    cur.execute("SELECT canal, canal_origen FROM conversaciones WHERE id = ?", (conversacion_id,))
+    row = cur.fetchone()
+    if not row:
+        con.close()
+        return {"ok": False, "error": "not_found"}
+    canal = row[0] or row[1] or 'wc'
+    cur.execute(
+        """INSERT INTO mensajes (conversacion_id, direccion, canal, contenido, enviado_por)
+           VALUES (?, 'NOTE', ?, ?, ?)""",
+        (conversacion_id, canal, texto, agente),
+    )
+    mensaje_id = cur.lastrowid
+    con.commit()
+    con.close()
+    logg(f"guardar_nota_interna: conv={conversacion_id} agente={agente}")
+    return {"ok": True, "mensaje_id": mensaje_id}
+
+
 def obtener_mensajes_conversacion(conversacion_id):
     """Devuelve los mensajes de una conversación ordenados cronológicamente."""
     con = sqlite3.connect(CHATBOT_DB)
@@ -655,7 +772,10 @@ def obtener_mensajes_conversacion(conversacion_id):
         """SELECT m.id, m.fecha_hora, m.direccion, m.canal, m.contenido,
                   m.message_id, m.provider_message_id, m.template_id,
                   m.metadata, m.enviado_por,
-                  c.session_id, c.cod_persona, c.telefono, c.asignado_a
+                  m.tiene_archivo, m.archivo_nombre, m.archivo_tipo,
+                  m.archivo_url, m.archivo_size,
+                  c.session_id, c.cod_persona, c.telefono, c.asignado_a,
+                  c.atendido_por
              FROM mensajes m
              JOIN conversaciones c ON c.id = m.conversacion_id
             WHERE m.conversacion_id = ?
@@ -763,9 +883,25 @@ def obtener_respuestas_plantilla(desde=None, hasta=None, q=None, pagina=1, por_p
     )
     filas_raw = cur.fetchall()
     con.close()
-    logg(f" {w}. Filas obtenidas: {total}")
+    #logg(f" {w}. Filas obtenidas: {total}")
     return filas_raw, total
 
+def guardar_cliente(numero):
+
+    conn = sqlite3.connect(CHATBOT_DB)
+    cur = conn.cursor()
+    conversacion_id = redisdb.get_variable(numero, "conversacion_id")
+    cod_persona_b = redisdb.get_variable(numero, "cod_persona")
+    cod_persona = cod_persona_b.decode() if cod_persona_b else None
+    templateId_b = redisdb.get_variable(numero, "templateId")
+    templateId = templateId_b.decode() if templateId_b else None
+    cur.execute("""
+            UPDATE conversaciones
+               SET cod_persona = ?, template_id = ?
+             WHERE id = ?
+    """, (cod_persona, templateId, conversacion_id))
+
+    conn.commit()
 
 def guardar_mensaje(
     session_id,
@@ -845,7 +981,7 @@ def guardar_mensaje(
             ))
 
             conversacion_id = cur.lastrowid           
-
+        
         #
         # Metadata JSON
         #
@@ -936,7 +1072,8 @@ def guardar_mensaje(
             f"enviado_por={enviado_por} "
             f"contenido={contenido}"
         )
-
+        redisdb.set_variable(telefono, "session_id", session_id)
+        redisdb.set_variable(telefono, "conversacion_id", conversacion_id)
         return {
             "ok": True,
             "conversacion_id": conversacion_id,
@@ -959,7 +1096,7 @@ def guardar_mensaje(
 
         if conn:
             conn.close()
-
+    
 
 def guardar_interaccion(session_id, cod_cliente, canal, pregunta, intencion, respuesta, detalle=None):
     intent_source = intencion.get('intent_source') if isinstance(intencion, dict) else None
@@ -1390,9 +1527,10 @@ def buscar_notificaciones_por_destino(destino, tipo_notificacion=2, limit=5):
 
         sql = ("SELECT id_notificacion, NVL(fecha_adicion, NULL) AS fecha_envio, detalle_estado "
                "FROM PA.NOTIFICACIONES_CLIENTES "
-               "WHERE destino IN (" + ",".join(ph) + ") "
+               "WHERE DESTINO IN (" + ",".join(ph) + ") "
                "AND TIPO_NOTIFICACION = :tipo "
-               "ORDER BY fecha_adicion DESC")
+               "AND ESTADO_NOTIFICACION = 2 " # solo notificaciones enviadas
+               "ORDER BY FECHA_ADICION DESC")
 
         cursor.execute(sql, binds)
         rows = cursor.fetchmany(limit)

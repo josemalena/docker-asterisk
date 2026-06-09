@@ -1,0 +1,71 @@
+/* componentes.css — paneles colapsables, intents, adjuntos, acciones y perfil. */
+
+/* Paneles colapsables (FASE 4) */
+.panel-collapsible { border-bottom:1px solid var(--border); }
+.panel-toggle {
+  width:100%; display:flex; justify-content:space-between; align-items:center;
+  border:0; text-align:left; cursor:pointer; background:#f0f2f5;
+}
+.panel-toggle .counter { color:var(--muted); font-weight:600; }
+.panel-toggle .toggle-icon { transition:transform .15s ease; }
+.panel-toggle[aria-expanded="true"] .toggle-icon { transform:rotate(90deg); }
+.collapse-body { max-height:34vh; }
+
+/* Intents */
+.turn {
+  border:1px solid var(--border); border-radius:8px; padding:.55rem .7rem;
+  margin-bottom:.55rem; background:#fff; font-size:.84rem;
+}
+.turn .head { display:flex; justify-content:space-between; align-items:baseline; gap:.4rem; margin-bottom:.3rem; }
+.turn .ts { color:var(--muted); font-size:.72rem; white-space:nowrap; }
+.turn .intent {
+  display:inline-block; background:#dbeafe; color:#1e3a8a; padding:.1rem .5rem;
+  border-radius:999px; font-weight:600; font-size:.74rem;
+}
+.turn .intent.personal { background:#fee2e2; color:#991b1b; }
+.turn .intent.ayuda    { background:#dcfce7; color:#166534; }
+.turn .intent.saludo   { background:#fef3c7; color:#92400e; }
+.turn .src { display:inline-block; padding:.05rem .4rem; border-radius:6px; font-size:.68rem; font-weight:600; margin-left:.3rem; }
+.turn .src.regla { background:#e0e7ff; color:#3730a3; }
+.turn .src.llm   { background:#fce7f3; color:#9d174d; }
+.turn .src.menu  { background:#d1fae5; color:#065f46; }
+.turn .pregunta { color:var(--muted); font-style:italic; margin-bottom:.3rem; }
+.turn .ents { display:flex; flex-wrap:wrap; gap:.25rem; margin-top:.25rem; }
+.turn .ent {
+  background:#f0f2f5; color:#374151; padding:.08rem .45rem; border-radius:6px;
+  font-size:.7rem; font-family:ui-monospace,Menlo,Consolas,monospace;
+}
+.turn .raw { margin-top:.4rem; }
+.turn .raw summary { cursor:pointer; color:var(--muted); font-size:.7rem; font-style:italic; }
+.turn .raw pre {
+  background:#f7f8fa; border:1px solid var(--border); padding:.45rem .55rem; border-radius:6px;
+  margin:.25rem 0 0; overflow:auto; font-size:.7rem; line-height:1.35; max-height:200px;
+  white-space:pre-wrap; font-family:ui-monospace,Menlo,Consolas,monospace; color:#374151;
+}
+.turn.empty, .panel-empty { color:var(--muted); text-align:center; padding:1rem; font-style:italic; font-size:.82rem; }
+
+/* Adjuntos */
+.adjunto {
+  display:flex; align-items:center; gap:.5rem; padding:.45rem .55rem; margin-bottom:.4rem;
+  border:1px solid var(--border); border-radius:8px; background:#fff; font-size:.82rem;
+}
+.adjunto i { font-size:1.1rem; color:var(--pri2); }
+.adjunto .nombre { flex:1; min-width:0; word-break:break-word; }
+.adjunto .size { color:var(--muted); font-size:.72rem; white-space:nowrap; }
+
+/* Acciones */
+.acciones-body { display:flex; flex-direction:column; gap:.4rem; }
+.acciones-output {
+  border-top:1px solid var(--border); padding:.7rem .85rem; font-size:.83rem;
+  white-space:pre-wrap; word-break:break-word; background:#fbfbfd; max-height:30vh; overflow:auto;
+}
+
+/* Perfil / Datos Cliente (FASE 10) */
+.perfil { margin:0; }
+.perfil dt { font-size:.72rem; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); margin-top:.5rem; }
+.perfil dt:first-child { margin-top:0; }
+.perfil dd { margin:0 0 .15rem; font-size:.9rem; color:var(--ink); word-break:break-word; }
+
+.badge.estado-validacion[data-estado="sin_validar"] { background:#f3f4f6; color:#6b7280; }
+.badge.estado-validacion[data-estado="validando"]   { background:#fef3c7; color:#92400e; }
+.badge.estado-validacion[data-estado="validado"]    { background:#dcfce7; color:#166534; }

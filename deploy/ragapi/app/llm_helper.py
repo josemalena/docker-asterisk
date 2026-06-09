@@ -88,7 +88,7 @@ def fecha_de_texto(texto: str) -> str:
 
 def conocimiento_general(entities=None):
     retorno = []
-    conocimiento = load_jsonl_from_file('app/context_cvr.jsonl')
+    conocimiento = load_jsonl_from_file('context_cvr.jsonl')
     for item in conocimiento:
         for entity in entities:
             if entity["tipo"] == item["tipo"]:
@@ -362,7 +362,7 @@ def extract_entities(intent, query: str) -> Dict:
     query = normalize_text(query)
     logg(f"extract_entities('{intent}', '{query}')")
     found = []
-    local_entities = load_jsonl_from_file('app/entities.jsonl')
+    local_entities = load_jsonl_from_file('entities.jsonl')
     for item in local_entities:
         if intent == item["tipo"]:
             #logg(f"extract_entities: item: {item} in '{query}'")

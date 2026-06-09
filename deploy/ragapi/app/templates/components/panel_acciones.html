@@ -1,0 +1,40 @@
+{# Componente: Panel de Acciones del agente (FASE 8). Bootstrap Icons obligatorios. #}
+<div class="panel panel-acciones">
+  <div class="panel-head"><i class="bi bi-lightning-charge me-1"></i>Acciones</div>
+  <div class="panel-body acciones-body">
+    <button class="btn btn-success btn-sm accion w-100" data-accion="atender" id="btn-atender">
+      <i class="bi bi-headset me-1"></i>Iniciar atención
+    </button>  
+    <button id="btn-identificar" class="btn btn-outline-primary btn-sm accion w-100" data-accion="identificar" disabled>
+      <i class="bi bi-person-vcard me-1"></i>Solicitar identificación
+    </button>
+    <hr class="my-2">
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="cliente">
+      <i class="bi bi-person-lines-fill me-1"></i>Ver perfil
+    </button>
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="cuentas">
+      <i class="bi bi-wallet2 me-1"></i>Ver cuentas
+    </button>
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="prestamos">
+      <i class="bi bi-cash-coin me-1"></i>Ver préstamos
+    </button>
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="certificados">
+      <i class="bi bi-file-earmark-text me-1"></i>Ver certificados
+    </button>
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="feria">
+      <i class="bi bi-bag-check me-1"></i>Ver feria
+    </button>
+    <hr class="my-2">
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="nota">
+      <i class="bi bi-journal-text me-1"></i>Nota interna
+    </button>
+    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="transferir">
+      <i class="bi bi-arrow-left-right me-1"></i>Transferir
+    </button>
+    <button class="btn btn-outline-danger btn-sm accion w-100" data-accion="cerrar">
+      <i class="bi bi-x-circle me-1"></i>Cerrar caso
+    </button>
+  </div>
+  {# Salida de resultados de "Ver perfil/cuentas/préstamos/..." #}
+  <div class="acciones-output" id="acciones-output" hidden></div>
+</div>

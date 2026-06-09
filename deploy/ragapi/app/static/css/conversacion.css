@@ -1,0 +1,68 @@
+/* conversacion.css — layout del modal de conversación (FASE 3) y chat. */
+
+.conv-modal { height:90vh; max-height:90vh; overflow:hidden; }
+.conv-modal .modal-header { background:var(--pri); color:#fff; padding:.6rem 1rem; }
+.conv-modal .modal-header .btn-close { filter:invert(1) grayscale(1) brightness(2); }
+.conv-modal .modal-body { overflow:hidden; height:calc(90vh - 52px); }
+
+/* Rejilla de 3 columnas: Cliente | Conversación | Acciones/Datos */
+.conv-grid {
+  display:grid;
+  grid-template-columns:270px minmax(0,1fr) 310px;
+  height:100%;
+}
+.conv-col { display:flex; flex-direction:column; overflow:hidden; border-right:1px solid var(--border); }
+.conv-col-right { border-right:0; }
+.conv-col-center { background:#fff; }
+
+.col-section-title {
+  padding:.5rem .9rem; font-size:.8rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--pri); background:#eef2ff; border-bottom:1px solid var(--border);
+}
+
+/* Pantallas pequeñas: el modal es fullscreen y las columnas se apilan con scroll global */
+@media (max-width:992px) {
+  .conv-modal, .conv-modal .modal-body { height:auto; max-height:none; }
+  .conv-modal .modal-body { overflow-y:auto; }
+  .conv-grid { grid-template-columns:1fr; height:auto; }
+  .conv-col { border-right:0; border-bottom:1px solid var(--border); }
+  .conv-col-center { min-height:55vh; }
+  .panel-chat .chat { min-height:40vh; }
+}
+
+/* Paneles genéricos dentro del modal */
+.panel { display:flex; flex-direction:column; overflow:hidden; }
+.panel-head {
+  background:#f0f2f5; padding:.5rem .9rem; font-size:.82rem; font-weight:600;
+  color:var(--ink); border-bottom:1px solid var(--border);
+}
+.panel-body { overflow-y:auto; padding:.85rem; }
+
+/* Columna central: conversación */
+.panel-chat { flex:1; min-height:0; }
+.panel-chat .panel-body.chat { flex:1; min-height:0; background:#e5ddd5; }
+.chat .row { display:flex; flex-direction:column; margin-bottom:.4rem; }
+.chat .row.right { align-items:flex-end; }
+.chat .row.center { align-items:center; }
+.chat .message {
+  max-width:78%; margin-bottom:.15rem; padding:.5rem .75rem; border-radius:14px;
+  font-size:.88rem; line-height:1.35; word-break:break-word; white-space:pre-wrap;
+  box-shadow:0 1px 1px rgba(0,0,0,.08);
+}
+.chat .message.bot  { align-self:flex-start; background:#ffffff; border-bottom-left-radius:2px; }
+.chat .message.user { align-self:flex-end; background:#dcf8c6; border-bottom-right-radius:2px; }
+.chat .message.note { background:#fff8db; border:1px solid #f1e0a6; color:#7a5b00; font-style:italic; max-width:90%; }
+.chat .ts { font-size:.7rem; color:#667; margin-top:.05rem; }
+.chat .msg-file { display:inline-flex; align-items:center; gap:.35rem; font-size:.8rem; }
+
+/* Compositor */
+.composer {
+  display:flex; gap:.5rem; padding:.55rem; border-top:1px solid var(--border);
+  background:#f7f8fa; align-items:flex-end;
+}
+.composer textarea { resize:none; min-height:38px; max-height:120px; font-size:.88rem; }
+.composer .composer-send, .composer .composer-attach { white-space:nowrap; }
+
+/* Badge de handoff en la cabecera */
+#conv-handoff-badge.bot   { background:#e0e7ff; color:#3730a3; }
+#conv-handoff-badge.humano { background:#dcfce7; color:#166534; }

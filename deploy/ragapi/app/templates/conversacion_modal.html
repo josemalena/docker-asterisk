@@ -1,0 +1,46 @@
+{# Modal de conversación (FASE 3). Distribución de 3 columnas:
+   ┌────────────┬────────────────────┬───────────────┐
+   │ Cliente    │ Conversación       │ Acciones      │
+   │ Intents    │                    │ Datos Cliente │
+   │ Adjuntos   │                    │               │
+   └────────────┴────────────────────┴───────────────┘
+   El contenido dinámico lo rellena conversacion.js / acciones_agente.js. #}
+<div class="modal fade" id="modalConversacion" tabindex="-1" aria-labelledby="modalConvTitle" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+    <div class="modal-content conv-modal">
+      <div class="modal-header">
+        <h2 class="modal-title h6 mb-0" id="modalConvTitle">
+          <i class="bi bi-chat-left-text me-1"></i><span id="conv-title-text">Conversación</span>
+        </h2>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge rounded-pill" id="conv-handoff-badge" hidden></span>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+      </div>
+
+      <div class="modal-body p-0">
+        <div class="conv-grid">
+
+          {# ── Columna izquierda: Cliente (Intents + Adjuntos) ── #}
+          <aside class="conv-col conv-col-left">
+            <div class="col-section-title"><i class="bi bi-person me-1"></i>Cliente</div>
+            {% include 'components/panel_intents.html' %}
+            {% include 'components/panel_adjuntos.html' %}
+          </aside>
+
+          {# ── Columna central: Conversación ── #}
+          <section class="conv-col conv-col-center">
+            {% include 'components/mensajes.html' %}
+          </section>
+
+          {# ── Columna derecha: Acciones + Datos Cliente ── #}
+          <aside class="conv-col conv-col-right">
+            {% include 'components/panel_acciones.html' %}
+            {% include 'components/panel_cliente.html' %}
+          </aside>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
