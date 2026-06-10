@@ -124,7 +124,7 @@
         '<div class="ts">' + U.esc(autor) + ' · ' + U.fmtTs(m.fecha) + '</div></div>';
     }).join('') || '<p class="panel-empty">Sin mensajes.</p>';
 
-    if (pegado) $chat.scrollTop = $chat.scrollHeight;
+    if (pegado) requestAnimationFrame(function () { $chat.scrollTop = $chat.scrollHeight; });
   }
 
   function renderIntents(msgs) {

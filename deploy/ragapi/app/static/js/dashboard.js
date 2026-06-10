@@ -111,11 +111,19 @@
 
     }
 
+    function autoAbrirDesdeQuery() {
+        const qs = new URLSearchParams(window.location.search);
+        const convId = qs.get('open_conv');
+        if (!convId) return;
+        abrirConversacion(convId);
+    }
+
     function init() {
 
         bindConversaciones();
         bindRefrescar();
         bindBuscador();
+        autoAbrirDesdeQuery();
 
         console.log(
             'dashboard.js inicializado'

@@ -1492,6 +1492,114 @@ def nombre_usuario(usuario):
         return rows[0][0]
     return False
 
+def _candidatos_destino(destino):
+    """Normaliza un destino a sus variantes de número (sólo dígitos).
+
+    Devuelve la lista de candidatos a buscar en DESTINO, sin duplicados.
+    """
+    digits = re.sub(r"\D", "", str(destino or ""))
+    if not digits:
+        return []
+    candidates = [digits]
+    # si viene con prefijo 1 (ej. 1829...), incluir sin prefijo
+    if digits.startswith('1') and len(digits) == 11:
+        candidates.append(digits[1:])
+    # si viene sin prefijo y tiene 10 dígitos, incluir con 1 delante
+    if len(digits) == 10:
+        candidates.append('1' + digits)
+    # eliminar duplicados preservando orden
+    return list(dict.fromkeys(candidates))
+
+
+def _parse_detalle_lob(detalle_raw):
+    """Lee/parsea el campo DETALLE_ESTADO (posible LOB) a JSON o str."""
+    try:
+        detalle_s = detalle_raw.read() if hasattr(detalle_raw, 'read') else detalle_raw
+    except Exception:
+        detalle_s = detalle_raw
+    try:
+        if isinstance(detalle_s, (bytes, bytearray)):
+            detalle_s = detalle_s.decode('utf-8', errors='ignore')
+        if isinstance(detalle_s, str) and detalle_s.strip():
+            return json.loads(detalle_s)
+    except Exception:
+        pass
+    return detalle_s
+
+
+def buscar_notificaciones_por_destinos(destinos, tipo_notificacion=2):
+    """Versión por lote de buscar_notificaciones_por_destino.
+
+    Recibe un iterable de destinos y hace UNA sola consulta a Oracle (dividida
+    en lotes por el límite del IN), en lugar de una consulta por destino.
+
+    Retorna un dict { destino_original: detalle } donde `detalle` es la
+    notificación enviada (ESTADO=2) más reciente para cualquier variante del
+    número. Los destinos sin notificación quedan fuera del dict.
+    """
+    # destino_original -> lista de candidatos
+    por_destino = {}
+    todos = []
+    for d in destinos:
+        cands = _candidatos_destino(d)
+        if not cands:
+            continue
+        por_destino[d] = cands
+        todos.extend(cands)
+    if not todos:
+        return {}
+
+    # candidato (sólo dígitos) -> {'fecha': ..., 'detalle': ...} (el más reciente)
+    cand_info = {}
+    try:
+        cursor = connection.cursor()
+        unicos = list(dict.fromkeys(todos))
+        CHUNK = 500  # margen bajo el límite de 1000 elementos del IN de Oracle
+        for ini in range(0, len(unicos), CHUNK):
+            lote = unicos[ini:ini + CHUNK]
+            ph, binds = [], {}
+            for i, c in enumerate(lote):
+                key = f"d{i}"
+                ph.append(':' + key)
+                binds[key] = c
+            binds['tipo'] = tipo_notificacion
+            sql = ("SELECT id_notificacion, fecha_adicion, destino, detalle_estado "
+                   "FROM PA.NOTIFICACIONES_CLIENTES "
+                   "WHERE DESTINO IN (" + ",".join(ph) + ") "
+                   "AND TIPO_NOTIFICACION = :tipo "
+                   "AND ESTADO_NOTIFICACION = 2 "
+                   "ORDER BY FECHA_ADICION DESC")
+            cursor.execute(sql, binds)
+            for row in cursor.fetchall():
+                destino_db = re.sub(r"\D", "", str(row[1 + 1] or ""))
+                if not destino_db or destino_db in cand_info:
+                    continue  # ya guardamos la más reciente para este candidato
+                cand_info[destino_db] = {
+                    'fecha': row[1],
+                    'detalle': _parse_detalle_lob(row[3]),
+                }
+    except Exception as e:
+        loge(f"buscar_notificaciones_por_destinos: error: {e}")
+        return {}
+
+    # resolver, por cada destino original, el candidato con la notif más reciente
+    result = {}
+    for d, cands in por_destino.items():
+        best = None
+        for c in cands:
+            info = cand_info.get(c)
+            if info is None:
+                continue
+            if best is None or (info['fecha'] is not None and
+                                (best['fecha'] is None or info['fecha'] > best['fecha'])):
+                best = info
+        if best is not None:
+            result[d] = best['detalle']
+    logg(f"buscar_notificaciones_por_destinos: destinos={len(por_destino)} "
+         f"con_notif={len(result)} lotes={(len(list(dict.fromkeys(todos)))+499)//500}")
+    return result
+
+
 def buscar_notificaciones_por_destino(destino, tipo_notificacion=2, limit=5):
     """Busca en PA.NOTIFICACIONES_CLIENTES notificaciones enviadas al destino.
 
@@ -1501,19 +1609,9 @@ def buscar_notificaciones_por_destino(destino, tipo_notificacion=2, limit=5):
     Retorna lista de dicts: {"id": ..., "fecha_envio": ..., "detalle_raw": ..., "detalle": parsed_or_str}
     """
     try:
-        digits = re.sub(r"\D", "", str(destino or ""))
-        if not digits:
+        candidates = _candidatos_destino(destino)
+        if not candidates:
             return []
-        candidates = [digits]
-        # si viene con prefijo 1 (ej. 1829...), incluir sin prefijo
-        if digits.startswith('1') and len(digits) == 11:
-            candidates.append(digits[1:])
-        # si viene sin prefijo y tiene 10 dígitos, incluir con 1 delante
-        if len(digits) == 10:
-            candidates.append('1' + digits)
-
-        # eliminar duplicados
-        candidates = list(dict.fromkeys(candidates))
 
         cursor = connection.cursor()
         # construir placeholders dinámicos

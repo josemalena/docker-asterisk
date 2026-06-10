@@ -12,18 +12,36 @@
     <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="cliente">
       <i class="bi bi-person-lines-fill me-1"></i>Ver perfil
     </button>
-    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="cuentas">
-      <i class="bi bi-wallet2 me-1"></i>Ver cuentas
-    </button>
-    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="prestamos">
-      <i class="bi bi-cash-coin me-1"></i>Ver préstamos
-    </button>
+    <div class="btn-group w-100" role="group" aria-label="Cuentas">
+      <button class="btn btn-outline-secondary btn-sm accion" data-accion="cuentas">
+        <i class="bi bi-wallet2 me-1"></i>Ver cuentas
+      </button>
+      <button class="btn btn-outline-success btn-sm accion flex-grow-0" data-accion="enviar-cuentas"
+              title="Enviar cuentas al cliente">
+        <i class="bi bi-send"></i>
+      </button>
+    </div>
+    <div class="btn-group w-100" role="group" aria-label="Préstamos">
+      <button class="btn btn-outline-secondary btn-sm accion" data-accion="prestamos">
+        <i class="bi bi-cash-coin me-1"></i>Ver préstamos
+      </button>
+      <button class="btn btn-outline-success btn-sm accion flex-grow-0" data-accion="enviar-prestamos"
+              title="Enviar préstamos al cliente">
+        <i class="bi bi-send"></i>
+      </button>
+    </div>
     <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="certificados">
       <i class="bi bi-file-earmark-text me-1"></i>Ver certificados
     </button>
-    <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="feria">
-      <i class="bi bi-bag-check me-1"></i>Ver feria
-    </button>
+    <div class="btn-group w-100" role="group" aria-label="Feria">
+      <button class="btn btn-outline-secondary btn-sm accion" data-accion="feria">
+        <i class="bi bi-bag-check me-1"></i>Ver feria
+      </button>
+      <button class="btn btn-outline-success btn-sm accion flex-grow-0" data-accion="enviar-feria"
+              title="Enviar feria al cliente">
+        <i class="bi bi-send"></i>
+      </button>
+    </div>
     <hr class="my-2">
     <button class="btn btn-outline-secondary btn-sm accion w-100" data-accion="nota">
       <i class="bi bi-journal-text me-1"></i>Nota interna

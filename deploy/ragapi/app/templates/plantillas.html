@@ -7,6 +7,67 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/conversacion.css') }}">
+  <style>
+    .copy-btn  { border:0; background:transparent; color:#6c757d; padding:0 .25rem; cursor:pointer; }
+    .copy-btn:hover { color:#0d6efd; }
+    .copied-tip { font-size:.75rem; color:#198754; margin-left:.3rem; }
+    .badge.con-url { background:#e8f5e9; color:#1b5e20; }
+    .badge.sin-url { background:#f3f4f6; color:#6b7280; }
+    .pager { display:flex; align-items:center; justify-content:space-between; gap:.75rem; }
+    .pager .actual { color:#6c757d; font-size:.9rem; }
+    .empty { padding:2rem; text-align:center; color:#6c757d; }
+
+    /* ── grid de cards ── */
+    .conv-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:.85rem; }
+
+    .conv-card  {
+      border:1px solid #dee2e6; border-radius:.5rem; background:#fff;
+      display:flex; flex-direction:column; box-shadow:0 1px 3px rgba(0,0,0,.06);
+      transition:box-shadow .15s;
+    }
+    .conv-card:hover { box-shadow:0 3px 10px rgba(0,0,0,.1); }
+
+    /* cabecera */
+    .conv-card-head {
+      padding:.6rem .8rem; border-bottom:1px solid #f0f0f0;
+      display:flex; align-items:center; gap:.4rem; flex-wrap:wrap;
+      background:#f8f9fa; border-radius:.5rem .5rem 0 0;
+    }
+    .conv-card-head .nombre {
+      font-weight:600; font-size:.9rem; flex:1; min-width:0;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .conv-card-head .tel { font-size:.78rem; color:#666; white-space:nowrap; }
+
+    /* cuerpo */
+    .conv-card-body { padding:.7rem .8rem; flex:1; display:flex; flex-direction:column; gap:.5rem; }
+    .conv-desc { font-size:.78rem; color:#555; font-style:italic; }
+
+    /* badges de mensajes */
+    .msg-badges { display:flex; flex-wrap:wrap; gap:.3rem; }
+    .msg-badge  {
+      cursor:pointer; max-width:200px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+      font-size:.76rem; padding:.2rem .55rem; border-radius:1rem;
+      background:#e8f0fe; color:#1a3c7a;
+      border:1px solid #c2d3f7; transition:background .12s;
+      display:inline-flex; align-items:center; gap:.25rem;
+    }
+    .msg-badge:hover { background:#c9dbff; border-color:#94b5f5; }
+    .msg-badge .ts   { font-size:.68rem; color:#7a9; flex-shrink:0; }
+
+    /* pie */
+    .conv-card-foot {
+      padding:.45rem .8rem; border-top:1px solid #f0f0f0;
+      display:flex; align-items:center; gap:.35rem; flex-wrap:wrap;
+    }
+    .conv-card-foot .meta-badge {
+      font-size:.73rem; padding:.15rem .5rem; border-radius:.4rem;
+      background:#f3f4f6; color:#555; border:1px solid #e0e0e0;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:150px;
+    }
+  </style>
 </head>
 <body>
   <div class="topbar">
@@ -19,6 +80,8 @@
   </div>
 
   <div class="container-fluid py-3">
+
+    {# ── Filtros ── #}
     <form method="GET" class="card card-body mb-3">
       <div class="row g-3 align-items-end">
         <div class="col-6 col-md-2">
@@ -44,14 +107,17 @@
         <div class="col-12 col-md-3 d-flex gap-2 flex-wrap">
           <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-funnel me-1"></i>Filtrar</button>
           <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('respuestas_plantilla') }}">Limpiar</a>
-          <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('respuestas_plantilla_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q}) }}"><i class="bi bi-download me-1"></i>CSV</a>
+          <a class="btn btn-outline-secondary btn-sm"
+             href="{{ url_for('respuestas_plantilla_csv', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or ''}) }}">
+            <i class="bi bi-download me-1"></i>CSV
+          </a>
         </div>
       </div>
     </form>
 
     <div class="info-banner mb-3">
       <i class="bi bi-info-circle me-1"></i>
-      Respuestas recibidas de clientes a notificaciones de plantilla enviadas por WhatsApp.
+      Respuestas de clientes a notificaciones de plantilla por WhatsApp.
     </div>
 
     <div class="row g-2 mb-3 stats-row">
@@ -62,58 +128,242 @@
 
     <p class="text-muted small mb-2">Mostrando {{ desde_idx }}–{{ hasta_idx }} de {{ total }} respuestas.</p>
 
-    <div class="card">
-      {% if filas %}
-      <div class="table-responsive">
-        <table class="table table-sm align-middle mb-0">
-          <thead>
-            <tr>
-              <th>Fecha</th><th>Teléfono</th><th>Nombre</th><th>Descripción</th>
-              <th>Enlace</th><th>Mensaje del cliente</th><th>Template</th><th>Fields</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in filas %}
-            <tr>
-              <td class="text-nowrap small">{{ r.fecha }}</td>
-              <td class="tel">{{ r.telefono }}</td>
-              <td class="nombre">{{ r.nombre }}</td>
-              <td class="desc">{{ r.descripcion }}</td>
-              <td>
-                {% if r.url %}
-                  <a href="{{ r.url }}" target="_blank" rel="noopener" class="badge con-url text-decoration-none"><i class="bi bi-link-45deg"></i> abrir</a>
-                {% else %}
-                  <span class="badge sin-url">sin enlace</span>
-                {% endif %}
-              </td>
-              <td class="msg">{{ r.mensaje }}</td>
-              <td class="tmpl">{{ r.template_id }}</td>
-              <td>
-                {% if r.fields_json %}
-                <details class="fd"><summary>ver</summary><pre>{{ r.fields_json }}</pre></details>
-                {% endif %}
-              </td>
-            </tr>
+    {# ── Cards agrupadas por teléfono ── #}
+    {% if filas %}
+    <div class="conv-cards">
+      {% for telefono, mensajes in (filas | groupby('telefono')) %}
+      {% set primer = mensajes | first %}
+      <div class="conv-card">
+
+        {# Cabecera: nombre · teléfono · botones #}
+        <div class="conv-card-head">
+          <span class="nombre" title="{{ primer.nombre }}">
+            {{ primer.nombre or 'Sin nombre' }}
+          </span>
+          <span class="tel">
+            {{ telefono }}
+            <button type="button" class="copy-btn" data-copy="{{ telefono }}" title="Copiar teléfono">
+              <i class="bi bi-copy"></i>
+            </button>
+          </span>
+          {% if primer.url %}
+          <a href="{{ primer.url }}" target="_blank" rel="noopener"
+             class="badge con-url text-decoration-none ms-auto me-1" title="{{ primer.url }}">
+            <i class="bi bi-link-45deg"></i>
+          </a>
+          {% else %}
+          <span class="ms-auto"></span>
+          {% endif %}
+          <button type="button"
+            class="btn btn-outline-primary btn-sm py-0 px-2 btn-abrir-conv"
+            data-telefono="{{ telefono }}" data-canal="wa"
+            title="Abrir conversación">
+            <i class="bi bi-chat-dots"></i>
+          </button>
+        </div>
+
+        {# Cuerpo: descripción + mensajes como badges #}
+        <div class="conv-card-body">
+          {% if primer.descripcion %}
+          <div class="conv-desc">
+            <i class="bi bi-tag me-1"></i>{{ primer.descripcion[:80] }}{% if primer.descripcion|length > 80 %}…{% endif %}
+          </div>
+          {% endif %}
+
+          <div class="msg-badges">
+            {% for m in mensajes %}
+            <span class="msg-badge"
+              data-bs-toggle="modal" data-bs-target="#modalDetalle"
+              data-fecha="{{ m.fecha }}"
+              data-mensaje="{{ m.mensaje | e }}"
+              data-url="{{ m.url | e }}"
+              data-template="{{ m.template_id | e }}"
+              data-fields="{{ m.fields_json | e }}"
+              title="{{ m.mensaje }}">
+              <span>{{ (m.mensaje or '—')[:38] }}{% if m.mensaje and m.mensaje|length > 38 %}…{% endif %}</span>
+              {% if m.fecha %}
+              <span class="ts">{{ m.fecha[-11:-3] if m.fecha|length > 11 else m.fecha }}</span>
+              {% endif %}
+            </span>
             {% endfor %}
-          </tbody>
-        </table>
+          </div>
+        </div>
+
+        {# Pie: conteo + template ID + fecha más reciente #}
+        <div class="conv-card-foot">
+          <span class="meta-badge">
+            <i class="bi bi-chat-text me-1"></i>{{ mensajes | list | length }}
+            msg{% if mensajes | list | length != 1 %}s{% endif %}
+          </span>
+          {% if primer.template_id %}
+          <span class="meta-badge" title="{{ primer.template_id }}">
+            <i class="bi bi-layout-text-window me-1"></i>{{ primer.template_id[:18] }}{% if primer.template_id|length > 18 %}…{% endif %}
+          </span>
+          {% endif %}
+          <span class="ms-auto text-muted" style="font-size:.72rem">{{ primer.fecha }}</span>
+        </div>
+
       </div>
-      {% else %}
-      <div class="empty">No hay respuestas con esos filtros.</div>
-      {% endif %}
+      {% endfor %}
     </div>
+    {% else %}
+    <div class="empty">
+      <i class="bi bi-inbox fs-4 d-block mb-2"></i>
+      No hay respuestas con esos filtros.
+    </div>
+    {% endif %}
 
     {% if total_paginas > 1 %}
     <nav class="pager mt-3">
       {% if pagina > 1 %}
-        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q,'pp':filtros.por_pagina,'p':pagina-1}) }}"><i class="bi bi-arrow-left"></i> Anterior</a>
+        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina-1}) }}">
+          <i class="bi bi-arrow-left"></i> Anterior
+        </a>
+      {% else %}
+        <span class="text-muted"><i class="bi bi-arrow-left"></i> Anterior</span>
       {% endif %}
       <span class="actual">Página {{ pagina }} de {{ total_paginas }}</span>
       {% if pagina < total_paginas %}
-        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q,'pp':filtros.por_pagina,'p':pagina+1}) }}">Siguiente <i class="bi bi-arrow-right"></i></a>
+        <a href="{{ url_for('respuestas_plantilla', **{'desde':filtros.desde,'hasta':filtros.hasta,'q':filtros.q or '','pp':filtros.por_pagina,'p':pagina+1}) }}">
+          Siguiente <i class="bi bi-arrow-right"></i>
+        </a>
+      {% else %}
+        <span class="text-muted">Siguiente <i class="bi bi-arrow-right"></i></span>
       {% endif %}
     </nav>
     {% endif %}
   </div>
+
+  {# ── Modal de detalle (Template · Fields · URL · Mensaje completo) ── #}
+  <div class="modal fade" id="modalDetalle" tabindex="-1" aria-labelledby="modalDetalleLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <h6 class="modal-title" id="modalDetalleLabel">
+            <i class="bi bi-envelope-open me-1"></i>Detalle del mensaje
+          </h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+        </div>
+        <div class="modal-body">
+          <dl class="row mb-0">
+            <dt class="col-sm-3 text-muted small">Fecha</dt>
+            <dd class="col-sm-9 small" id="det-fecha">—</dd>
+
+            <dt class="col-sm-3 text-muted small">Mensaje</dt>
+            <dd class="col-sm-9 small" id="det-mensaje">—</dd>
+
+            <dt class="col-sm-3 text-muted small">Enlace</dt>
+            <dd class="col-sm-9 small" id="det-url">—</dd>
+
+            <dt class="col-sm-3 text-muted small">Template ID</dt>
+            <dd class="col-sm-9 small d-flex align-items-center gap-1">
+              <span id="det-template">—</span>
+              <button type="button" class="copy-btn" id="det-template-copy" style="display:none" title="Copiar">
+                <i class="bi bi-copy"></i>
+              </button>
+            </dd>
+
+            <dt class="col-sm-3 text-muted small">Fields</dt>
+            <dd class="col-sm-9">
+              <pre id="det-fields"
+                class="small bg-light p-2 rounded mb-0"
+                style="max-height:280px;overflow:auto;white-space:pre-wrap;word-break:break-word">—</pre>
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% include 'conversacion_modal.html' %}
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/util.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/validacion.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/conversacion.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/acciones_agente.js') }}"></script>
+  <script>
+    // ── Detalle modal ──────────────────────────────────────────────────
+    document.getElementById('modalDetalle').addEventListener('show.bs.modal', function (e) {
+      const t = e.relatedTarget;
+      if (!t) return;
+      document.getElementById('det-fecha').textContent   = t.dataset.fecha    || '—';
+      document.getElementById('det-mensaje').textContent = t.dataset.mensaje  || '—';
+      document.getElementById('det-fields').textContent  = t.dataset.fields   || '—';
+
+      const tmpl     = t.dataset.template || '';
+      const tmplEl   = document.getElementById('det-template');
+      const tmplCopy = document.getElementById('det-template-copy');
+      tmplEl.textContent        = tmpl || '—';
+      tmplCopy.style.display    = tmpl ? '' : 'none';
+      tmplCopy.dataset.copy     = tmpl;
+
+      const url   = t.dataset.url || '';
+      const urlEl = document.getElementById('det-url');
+      if (url) {
+        urlEl.innerHTML =
+          '<a href="' + url + '" target="_blank" rel="noopener">' + url + '</a> ' +
+          '<button type="button" class="copy-btn" data-copy="' + url.replace(/"/g,'&quot;') + '" title="Copiar"><i class="bi bi-copy"></i></button>';
+      } else {
+        urlEl.textContent = 'Sin enlace';
+      }
+    });
+
+    // ── Copiar al portapapeles ─────────────────────────────────────────
+    document.addEventListener('click', async function (e) {
+      const btn = e.target.closest('[data-copy]');
+      if (!btn) return;
+      const text = btn.getAttribute('data-copy') || '';
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        const tip = document.createElement('span');
+        tip.className = 'copied-tip';
+        tip.textContent = '✓ copiado';
+        btn.insertAdjacentElement('afterend', tip);
+        setTimeout(() => tip.remove(), 1300);
+      } catch (_) {}
+    });
+
+    // ── Abrir modal de conversación ────────────────────────────────────
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('.btn-abrir-conv');
+      if (!btn) return;
+      const telefono = btn.dataset.telefono;
+      const canal    = btn.dataset.canal || 'wa';
+      if (!telefono) return;
+
+      const C = window.RealIA && window.RealIA.conversacion;
+      if (!C || typeof C.abrir !== 'function') {
+        window.location.href = '/interacciones/abrir?session_id=' +
+          encodeURIComponent(telefono) + '&canal=' + encodeURIComponent(canal);
+        return;
+      }
+
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+      fetch('/interacciones/resolver?session_id=' + encodeURIComponent(telefono) +
+            '&canal=' + encodeURIComponent(canal))
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (j.ok && j.conv_id) {
+            C.abrir(j.conv_id);
+          } else {
+            window.location.href = '/interacciones/abrir?session_id=' +
+              encodeURIComponent(telefono) + '&canal=' + encodeURIComponent(canal);
+          }
+        })
+        .catch(function () {
+          window.location.href = '/interacciones/abrir?session_id=' +
+            encodeURIComponent(telefono) + '&canal=' + encodeURIComponent(canal);
+        })
+        .finally(function () {
+          btn.disabled = false;
+          btn.innerHTML = orig;
+        });
+    });
+  </script>
 </body>
 </html>

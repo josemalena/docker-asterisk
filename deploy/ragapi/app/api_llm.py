@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from random import randint
 
 # Base de datos
-from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_conversacion, obtener_conversacion_header, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, validar_usuario, guardar_mensaje, nombre_usuario, marcar_atendido_por, obtener_atendido_por, cerrar_conversacion, transferir_conversacion, guardar_nota_interna, guardar_cliente
+from rag_db import ConversationManager, obtener_interacciones, obtener_conversaciones, obtener_mensajes_conversacion, obtener_conversacion_header, obtener_respuestas_plantilla, guardar_interaccion, disable_log, enable_log, envia_sms, buscar_cliente_por_cedula, buscar_cliente, contexto_cliente, fin, logg, loge, logx, validar_cedula, buscar_notificaciones_por_destino, buscar_notificaciones_por_destinos, validar_usuario, guardar_mensaje, nombre_usuario, marcar_atendido_por, obtener_atendido_por, cerrar_conversacion, transferir_conversacion, guardar_nota_interna, guardar_cliente
 
 # Menú interactivo WhatsApp
 import menu
@@ -1249,7 +1249,7 @@ def fecha_de_texto(texto: str) -> str:
 def conocimiento_general(entities=None):
     retorno = []
     #logg(f"conocimiento_general: '{entities}'")
-    conocimiento = load_jsonl_from_file('context_cvr.jsonl')
+    conocimiento = load_jsonl_from_file('context_cvr.json')
     #logg(f"conocimiento_general: JSONL cargado")
     for item in conocimiento:
         for entity in entities:
@@ -1427,7 +1427,7 @@ def clasificar_intencion_validacion(texto):
     if any(k in t for k in kw_agente):
         return "agente"
     kw_reenviar = ("reenviar", "reenvio", "otro codigo", "no recibo",
-                   "no llego", "no me llego", "no me ha llegado",
+                   "no llego", "no me ha llegado",
                    "mandalo de nuevo", "envialo de nuevo", "manda otro",
                    "envia otro")
     if any(k in t for k in kw_reenviar):
@@ -1531,6 +1531,7 @@ def enviar_menu_telefonos(canal, message_id, numero, saludo, nombres, telefonos)
         response = requests.post(ZENVIA_API, json=payload, headers=ZENVIA_HEADERS, verify=False)
         if response.status_code != 200:
             logg(f"enviar_menu_telefonos WA: {response.status_code}")
+           
             logg(f"enviar_menu_wa:\r\n=======INICIO RESPUESTA============\r\n{response.text}\r\n=========FIN RESPUESTA==========")
     elif canal == "wc":
         menu_payload = {
@@ -2087,20 +2088,40 @@ def _require_login():
 
 
 
-def _parse_plantilla_row(r):
+def _csv_celda(v):
+    """Normaliza un valor para una celda CSV: colapsa saltos de línea a espacio.
+
+    csv.writer ya escapa comas/comillas encerrando el campo entre comillas,
+    pero los saltos de línea embebidos confunden a algunos lectores (Excel).
+    """
+    if v is None:
+        return ''
+    return ' '.join(str(v).replace('\r\n', '\n').replace('\r', '\n').split('\n')).strip()
+
+
+def _parse_plantilla_row(r, notif_map=None):
     """Parsea una fila de obtener_respuestas_plantilla a dict listo para la vista.
     r: (id, fecha_hora, session_id, cod_persona, canal, pregunta, intencion, respuesta)
+
+    Si se pasa `notif_map` (dict {destino: detalle} obtenido por lote con
+    buscar_notificaciones_por_destinos), NO se consulta Oracle por fila: se
+    resuelve la notificación desde el mapa. Si es None se mantiene el
+    comportamiento anterior (una consulta a Oracle por fila).
     """
     intent_data = {}
     id = 0
     try:
         numero = r[2]
-        logg(f"_manejar_respuesta_plantilla: sin caché, consultando Oracle para {numero}")
-        matches = buscar_notificaciones_por_destino(numero, tipo_notificacion=2, limit=1)
-        if not matches:
-            return {}
-        m = matches[0]
-        detalle = m.get('detalle')
+        if notif_map is not None:
+            detalle = notif_map.get(numero)
+            if not detalle:
+                return {}
+        else:
+            logg(f"_manejar_respuesta_plantilla: sin caché, consultando Oracle para {numero}")
+            matches = buscar_notificaciones_por_destino(numero, tipo_notificacion=2, limit=1)
+            if not matches:
+                return {}
+            detalle = matches[0].get('detalle')
         #logg(f"detalle: {json.dumps(detalle, ensure_ascii=False, indent=2)}")
         try:
             id = detalle.get('id')
@@ -2108,7 +2129,7 @@ def _parse_plantilla_row(r):
         except Exception:
             return {}
         #logg(f"intent_data: {json.dumps(intent_data, ensure_ascii=False, indent=2)}")
-        
+
     except (TypeError, ValueError):
         pass
     
@@ -2152,8 +2173,10 @@ def respuestas_plantilla():
     )
     filas = []
 
+    notif_map = buscar_notificaciones_por_destinos(
+        [r[2] for r in filas_raw], tipo_notificacion=2)
     for r in filas_raw:
-        fila = _parse_plantilla_row(r)
+        fila = _parse_plantilla_row(r, notif_map)
         if fila:
             filas.append(fila)
     con_url = sum(1 for r in filas if r['url'])
@@ -2184,18 +2207,30 @@ def respuestas_plantilla_csv():
         pagina=1, por_pagina=50000,
     )
     buf = io.StringIO()
-    w = csv.writer(buf)
+    buf.write('\ufeff')
+    # QUOTE_ALL: encierra todos los campos entre comillas para que comas,
+    # punto y coma o saltos de l\u00ednea dentro del mensaje no rompan columnas.
+    w = csv.writer(buf, quoting=csv.QUOTE_ALL)
+    #w.writerow([
+    #    'fecha_recibido', 'telefono', 'nombre', 'descripcion',
+    #    'url', 'mensaje_cliente', 'templateId', 'outgoing_msg_id', 'fields_completo',
+    #])
     w.writerow([
-        'fecha_recibido', 'telefono', 'nombre', 'descripcion',
-        'url', 'mensaje_cliente', 'templateId', 'outgoing_msg_id', 'fields_completo',
+        'fecha_recibido', 'telefono', 'nombre','descripcion', 'template_id',  'mensaje_cliente',
     ])
+    notif_map = buscar_notificaciones_por_destinos(
+        [r[2] for r in filas_raw], tipo_notificacion=2)
     for r in filas_raw:
-        d = _parse_plantilla_row(r)
+        d = _parse_plantilla_row(r, notif_map)
         if d:
             w.writerow([
                 d['fecha'], d['telefono'], d['nombre'], d['descripcion'],
-                d['url'], d['mensaje'], d['template_id'], d['outgoing_msg_id'], d['fields_json'],
+                d['template_id'], _csv_celda(d['mensaje']),
             ])
+            #w.writerow([
+            #    d['fecha'], d['telefono'], d['nombre'], d['descripcion'],
+            #    d['url'], d['mensaje'], d['template_id'], d['outgoing_msg_id'], d['fields_json'],
+            #])
     out = buf.getvalue()
     fname = f"respuestas_plantilla_{f['desde']}_{f['hasta']}.csv"
     return app.response_class(
@@ -2618,9 +2653,13 @@ def interaccion_cliente(conversacion_id):
     })
 
 
-def _datos_cliente_endpoint(conversacion_id, entities, etiqueta, filtro_subtipo=None):
+def _datos_cliente_endpoint(conversacion_id, entities, etiqueta, filtro_subtipo=None, enviar=False):
     """Núcleo común de los endpoints de productos (cuentas/préstamos/certificados/feria).
-    Exige que el cliente esté validado y reutiliza contexto_cliente()."""
+    Exige que el cliente esté validado y reutiliza contexto_cliente().
+
+    Si `enviar` es True, además de consultar, entrega el texto formateado
+    directamente al cliente por su canal (reutiliza _enviar_a_conversacion, el
+    mismo flujo que /enviar) y lo persiste como mensaje OUT del agente."""
     if 'usuario' not in session:
         return jsonify({'error': 'unauthorized'}), 401
     header = obtener_conversacion_header(conversacion_id)
@@ -2643,19 +2682,38 @@ def _datos_cliente_endpoint(conversacion_id, entities, etiqueta, filtro_subtipo=
         return jsonify({'ok': False, 'error': 'error_consulta', 'detalle': str(e)}), 500
     if filtro_subtipo:
         items = [it for it in items if (it.get('subtipo') or '').lower() in filtro_subtipo]
+
+    if enviar:
+        if not items or not (texto or '').strip():
+            return jsonify({'ok': True, 'tipo': etiqueta, 'enviado': False,
+                            'mensaje': f'No hay {etiqueta} para enviar al cliente.'})
+        agente = session.get('usuario')
+        try:
+            ok_envio, ref = _enviar_a_conversacion(header, texto, agente)
+        except Exception as e:
+            loge(f"_datos_cliente_endpoint[{etiqueta}] enviar: {e}")
+            return jsonify({'ok': False, 'error': 'send_failed', 'detalle': str(e)}), 500
+        if not ok_envio:
+            return jsonify({'ok': False, 'error': ref,
+                            'mensaje': 'No se pudo enviar al cliente.'}), 400
+        return jsonify({'ok': True, 'tipo': etiqueta, 'enviado': True,
+                        'message_id': ref})
+
     return jsonify({'ok': True, 'tipo': etiqueta, 'items': items, 'texto': texto})
 
 
-@app.route('/interacciones/conversacion/<int:conversacion_id>/cuentas')
+@app.route('/interacciones/conversacion/<int:conversacion_id>/cuentas', methods=['GET', 'POST'])
 def interaccion_cuentas(conversacion_id):
     ents = [{"tipo": "producto", "subtipo": "cuenta", "valor": "cuentas"}]
-    return _datos_cliente_endpoint(conversacion_id, ents, 'cuentas', filtro_subtipo={'cuenta'})
+    return _datos_cliente_endpoint(conversacion_id, ents, 'cuentas', filtro_subtipo={'cuenta'},
+                                   enviar=(request.method == 'POST'))
 
 
-@app.route('/interacciones/conversacion/<int:conversacion_id>/prestamos')
+@app.route('/interacciones/conversacion/<int:conversacion_id>/prestamos', methods=['GET', 'POST'])
 def interaccion_prestamos(conversacion_id):
     ents = [{"tipo": "producto", "subtipo": "prestamo", "valor": "prestamos"}]
-    return _datos_cliente_endpoint(conversacion_id, ents, 'prestamos')
+    return _datos_cliente_endpoint(conversacion_id, ents, 'prestamos',
+                                   enviar=(request.method == 'POST'))
 
 
 @app.route('/interacciones/conversacion/<int:conversacion_id>/certificados')
@@ -2666,10 +2724,11 @@ def interaccion_certificados(conversacion_id):
     return _datos_cliente_endpoint(conversacion_id, ents, 'certificados', filtro_subtipo={'certificado'})
 
 
-@app.route('/interacciones/conversacion/<int:conversacion_id>/feria')
+@app.route('/interacciones/conversacion/<int:conversacion_id>/feria', methods=['GET', 'POST'])
 def interaccion_feria(conversacion_id):
     ents = [{"tipo": "articulo", "subtipo": "prestamo_feria", "valor": "articulos"}]
-    return _datos_cliente_endpoint(conversacion_id, ents, 'feria')
+    return _datos_cliente_endpoint(conversacion_id, ents, 'feria',
+                                   enviar=(request.method == 'POST'))
 
 
 # ─── Acciones adicionales del panel del agente (FASE 8) ─────────────────────
@@ -2750,7 +2809,60 @@ def interacciones_csv():
         headers={'Content-Disposition': f'attachment; filename="{fname}"'}
     )
 
-#######    
+# ─── Puente desde plantillas → interacciones ──────────────────────────────
+
+def _buscar_conversacion_reciente(session_id, canal='wa'):
+    """Busca la conversación más reciente por session_id o teléfono."""
+    import sqlite3
+    con = sqlite3.connect(os.getenv('SQLITE_DBNAME'))
+    cur = con.cursor()
+    cur.execute(
+        """
+        SELECT c.id
+        FROM conversaciones c
+        WHERE c.canal = ?
+          AND (c.session_id = ? OR c.telefono = ?)
+        ORDER BY COALESCE(c.fecha_cierre, c.fecha_ultimo_mensaje, c.fecha_creacion) DESC, c.id DESC
+        LIMIT 1
+        """,
+        (canal, session_id, session_id),
+    )
+    row = cur.fetchone()
+    con.close()
+    return row[0] if row else None
+
+
+@app.route('/interacciones/abrir')
+def interacciones_abrir():
+    """Puente desde plantillas hacia interacciones: redirige a la conversación más reciente."""
+    if (resp := _require_login()) is not None:
+        return resp
+    sid = (request.args.get('session_id') or '').strip()
+    canal = (request.args.get('canal') or 'wa').strip() or 'wa'
+    if not sid:
+        return redirect(url_for('interacciones', canal=canal))
+    conv_id = _buscar_conversacion_reciente(sid, canal=canal)
+    if conv_id:
+        return redirect(url_for('interacciones', canal=canal, q=sid, open_conv=conv_id))
+    return redirect(url_for('interacciones', canal=canal, q=sid))
+
+
+@app.route('/interacciones/resolver')
+def interacciones_resolver():
+    """Resuelve session_id/teléfono → conversacion_id como JSON (para abrir modal en cualquier página)."""
+    if (resp := _require_login()) is not None:
+        return jsonify({'ok': False, 'error': 'no_auth'}), 401
+    sid = (request.args.get('session_id') or '').strip()
+    canal = (request.args.get('canal') or 'wa').strip() or 'wa'
+    if not sid:
+        return jsonify({'ok': False, 'error': 'session_id requerido'}), 400
+    conv_id = _buscar_conversacion_reciente(sid, canal=canal)
+    if conv_id:
+        return jsonify({'ok': True, 'conv_id': conv_id})
+    return jsonify({'ok': False, 'error': 'not_found'})
+
+
+#######
 if __name__ == "__main__":
     logg(f"api_llm: Usando modelo '{OLLAMA_MODEL}' en '{OLLAMA_URL}' (USE_LLM={USE_LLM})")
     logg(f"========================================================")

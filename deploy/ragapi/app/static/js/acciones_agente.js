@@ -39,6 +39,25 @@
     }).catch(function () { out('Error de red consultando ' + U.esc(titulo) + '.', true); });
   }
 
+  // POST que envía los datos del cliente (cuentas/préstamos/feria) directo a su canal.
+  function enviarDatos(url, titulo) {
+    if (!global.confirm('¿Enviar ' + titulo + ' directamente al cliente?')) return;
+    out('<div class="text-muted">Enviando ' + U.esc(titulo) + ' al cliente…</div>');
+    U.postJSON(url, {}).then(function (res) {
+      const d = res.data || {};
+      if (!res.ok || !d.ok) {
+        out('<strong>' + U.esc(titulo) + '</strong><br>' + U.esc(d.mensaje || d.error || 'No se pudo enviar.'), true);
+        return;
+      }
+      if (d.enviado) {
+        out('<strong>' + U.esc(titulo) + ' enviado al cliente.</strong>');
+        C.recargar();
+      } else {
+        out('<strong>' + U.esc(titulo) + '</strong><br>' + U.esc(d.mensaje || 'No había datos para enviar.'), true);
+      }
+    }).catch(function () { out('Error de red enviando ' + U.esc(titulo) + '.', true); });
+  }
+
   function verPerfil(url) {
     U.getJSON(url).then(function (res) {
       const d = res.data || {};
@@ -76,6 +95,9 @@
     prestamos: function () { verDatos(base() + '/prestamos', 'Préstamos'); },
     certificados: function () { verDatos(base() + '/certificados', 'Certificados'); },
     feria: function () { verDatos(base() + '/feria', 'Feria'); },
+    'enviar-cuentas': function () { enviarDatos(base() + '/cuentas', 'Cuentas'); },
+    'enviar-prestamos': function () { enviarDatos(base() + '/prestamos', 'Préstamos'); },
+    'enviar-feria': function () { enviarDatos(base() + '/feria', 'Feria'); },
     nota: function () {
       const texto = global.prompt('Nota interna (no se envía al cliente):');
       if (!texto || !texto.trim()) return;

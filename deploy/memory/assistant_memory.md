@@ -1,6 +1,6 @@
 Memoria del asistente — Proyecto docker-asterisk
 
-Última actualización: 2026-05-14
+Última actualización: 2026-06-10
 
 Resumen
 
@@ -16,6 +16,8 @@ Estructura del archivo
 Decisiones
 
 - 2026-05-13: Se optó por rechazar archivos entrantes por WA y enviar un aviso + menú (implementado en `ragapi/app/api_llm.py`).
+- 2026-06-10: Roadmap de la vista del agente (Contact Center) Fases 13–26 definido. Diseño completo (modelo de datos, migraciones, APIs, componentes Jinja, JS, UX, riesgos, pruebas, orden) en `deploy/memory/plan_fases_13-26_agente.md`. Regla: NO modificar lo ya implementado; sólo extender.
+- 2026-06-10: `_parse_plantilla_row` ya no consulta Oracle por fila. Nueva función `buscar_notificaciones_por_destinos` (rag_db.py) trae todas las notificaciones en una sola consulta por lotes (IN ≤500); las vistas `/respuestas-plantilla` y `/respuestas-plantilla/csv` construyen el mapa una vez. CSV ahora usa `QUOTE_ALL` + helper `_csv_celda` (colapsa saltos de línea).
 
 
 Incidentes
@@ -49,6 +51,18 @@ Pendientes (TODO)
      4. Crear UI web mínima para que un oficial vea la cola y acepte handoffs (webchat dedicado).
      5. Registrar eventos en SQLite (creación, aceptación, cierre).
    - Resultado esperado: los oficiales pueden iniciar sesión, ver y aceptar handoffs; las interacciones quedan en SQLite bajo la misma DB existente.
+
+5. Vista del Agente / Contact Center — Fases 13–26
+   - Estado: en diseño/implementación incremental
+   - Prioridad: alta
+   - Plan completo: `deploy/memory/plan_fases_13-26_agente.md` (modelo de datos, migraciones, APIs, componentes, JS, UX, riesgos, pruebas, orden).
+   - Estado por fase:
+     - F13 Asignación de agentes: parcial (cols/funcs base; falta máquina de estados + tomar/liberar/UI)
+     - F14 Notas internas: parcial (backend NOTE listo; falta panel UI + GET)
+     - F15 Transferencia: parcial (reasigna; falta depto/motivo/historial)
+     - F16 SLA · F17 Etiquetas · F18 Colas · F19 Supervisión · F20 Auditoría · F21 KB · F22 Respuestas rápidas · F23 Timeline 360 · F24 Dashboard operacional · F25 IA agentes: pendientes
+     - F26 Multicanal: base (`canal`/`canal_origen` existen)
+   - Orden recomendado: 13 → 20 → 14/15 → 17 → 16 → 18 → 19 → 22/21 → 23/24 → 25 → 26.
 
 
 Notas rápidas
