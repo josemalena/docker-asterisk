@@ -1249,7 +1249,7 @@ def fecha_de_texto(texto: str) -> str:
 def conocimiento_general(entities=None):
     retorno = []
     #logg(f"conocimiento_general: '{entities}'")
-    conocimiento = load_jsonl_from_file('context_cvr.json')
+    conocimiento = load_jsonl_from_file('context_cvr.jsonl')
     #logg(f"conocimiento_general: JSONL cargado")
     for item in conocimiento:
         for entity in entities:
@@ -1294,9 +1294,6 @@ def construir_prompt(intencion, pregunta, contexto, conversacion, conocimiento_e
         else:
             params = JSON["default"]
     
-    #if intencion == "default" :
-    #    conocimiento_extra = load_jsonl_from_file("context_cvr.jsonl")
-
     if params:
         logg(f"construir_prompt: Plantilla cargada: '{intencion}'" )
     if len(params) >= 1:
@@ -2254,7 +2251,7 @@ def login():
 
         if valido:
             session['usuario'] = usuario
-            return redirect(url_for('interacciones'))
+            return redirect(url_for('respuestas-plantilla'))
         
         flash('Credenciales incorrectas')
     return render_template('login.html')
